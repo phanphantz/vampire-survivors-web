@@ -127,6 +127,16 @@ export class Character {
     this.aimIndicator.fillPath();
     this.aimIndicator.strokePath();
 
+    // Graphics.arc() after beginPath() doesn't reliably stroke the two radial edges (only the
+    // curved rim), so the cone's start/end boundaries are drawn explicitly as solid lines.
+    this.aimIndicator.lineStyle(1.5, 0xffffff, 0.7);
+    const startX = x + Math.cos(baseAngle - halfCone) * AIM_INDICATOR_LENGTH;
+    const startY = y + Math.sin(baseAngle - halfCone) * AIM_INDICATOR_LENGTH;
+    const endX = x + Math.cos(baseAngle + halfCone) * AIM_INDICATOR_LENGTH;
+    const endY = y + Math.sin(baseAngle + halfCone) * AIM_INDICATOR_LENGTH;
+    this.aimIndicator.lineBetween(x, y, startX, startY);
+    this.aimIndicator.lineBetween(x, y, endX, endY);
+
     this.aimIndicator.lineStyle(2, 0xffffff, 0.6);
     const tipX = x + this.aimDirection.x * AIM_INDICATOR_LENGTH;
     const tipY = y + this.aimDirection.y * AIM_INDICATOR_LENGTH;
