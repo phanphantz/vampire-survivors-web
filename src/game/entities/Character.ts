@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { angleToDirection8 } from '../formation/Formation';
+import { angleToDirection8, rotateTowardAngle } from '../formation/Formation';
 import type { Vec2 } from '../formation/Formation';
 import { CHARACTER_DISPLAY_HEIGHT, CHARACTER_FRAME_HEIGHT, CHARACTER_TEXTURE, idleAnimKey } from '../scenes/BootScene';
 
@@ -21,15 +21,17 @@ export const DEFAULT_STATS: CharacterStats = {
   attackConeDeg: 90,
 };
 
-const AIM_INDICATOR_LENGTH = 56;
-const HEALTH_BAR_WIDTH = 40;
-const HEALTH_BAR_HEIGHT = 6;
+const AIM_INDICATOR_LENGTH = 112;
+const HEALTH_BAR_WIDTH = 80;
+const HEALTH_BAR_HEIGHT = 9;
 const SPRITE_SCALE = CHARACTER_DISPLAY_HEIGHT / CHARACTER_FRAME_HEIGHT;
-const MOVEMENT_ARROW_OFFSET = 26; // px above the sprite's head, clear of the health bar
-const MOVEMENT_ARROW_LENGTH = 14;
-const MOVEMENT_ARROW_HEAD_SIZE = 6;
+const MOVEMENT_ARROW_OFFSET = 52; // px above the sprite's head, clear of the health bar
+const MOVEMENT_ARROW_LENGTH = 28;
+const MOVEMENT_ARROW_HEAD_SIZE = 12;
 const MOVEMENT_ARROW_HEAD_SPREAD_RAD = Math.PI / 6;
 const MOVEMENT_ARROW_COLOR = 0xfacc15;
+const MOVEMENT_TURN_RATE_RAD_PER_SEC = Math.PI * 3;
+const MIN_MOVE_DIST_FOR_TURN = 0.5; // px; ignore jitter when basically at the target already
 
 export class Character {
   sprite: Phaser.Physics.Arcade.Sprite;
@@ -40,6 +42,7 @@ export class Character {
   readonly isLeader: boolean;
 
   private currentDirectionIndex = -1;
+  private facingAngle = 0; // last direction moveToward() actually turned toward; holds while stationary
   private aimIndicator: Phaser.GameObjects.Graphics;
   private healthBar: Phaser.GameObjects.Graphics;
   private movementArrow: Phaser.GameObjects.Graphics | null = null;
@@ -64,10 +67,21 @@ export class Character {
     if (this.isLeader) this.movementArrow = scene.add.graphics().setDepth(7);
   }
 
-  /** Eases toward its formation slot. The sprite's facing is driven entirely by aimDirection (see setAimDirection), not movement. */
-  moveToward(target: { x: number; y: number }) {
-    this.sprite.x += (target.x - this.sprite.x) * this.stats.moveSmoothing;
-    this.sprite.y += (target.y - this.sprite.y) * this.stats.moveSmoothing;
+  /**
+   * Eases toward its formation slot. The sprite's own facing is driven entirely by aimDirection
+   * (see setAimDirection), not movement — but facingAngle is still tracked here purely for the
+   * leader's movement-direction arrow (see drawMovementArrow).
+   */
+  moveToward(target: { x: number; y: number }, dt: number) {
+    const dx = (target.x - this.sprite.x) * this.stats.moveSmoothing;
+    const dy = (target.y - this.sprite.y) * this.stats.moveSmoothing;
+    this.sprite.x += dx;
+    this.sprite.y += dy;
+
+    if (this.isLeader && Math.hypot(dx, dy) > MIN_MOVE_DIST_FOR_TURN) {
+      const targetAngle = Math.atan2(dy, dx);
+      this.facingAngle = rotateTowardAngle(this.facingAngle, targetAngle, MOVEMENT_TURN_RATE_RAD_PER_SEC * dt);
+    }
   }
 
   /**
@@ -120,7 +134,7 @@ export class Character {
 
     const frac = Phaser.Math.Clamp(this.hp / this.maxHp, 0, 1);
     const barX = x - HEALTH_BAR_WIDTH / 2;
-    const barY = y - this.sprite.displayHeight / 2 - 10;
+    const barY = y - this.sprite.displayHeight / 2 - 16;
     this.healthBar.clear();
     this.healthBar.fillStyle(0x000000, 0.5);
     this.healthBar.fillRect(barX - 1, barY - 1, HEALTH_BAR_WIDTH + 2, HEALTH_BAR_HEIGHT + 2);
