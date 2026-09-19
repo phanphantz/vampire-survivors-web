@@ -202,8 +202,9 @@ export class MainScene extends Phaser.Scene {
   }
 
   private spawnCharacter() {
+    const isLeader = this.squad.length === 0;
     const tint = CHARACTER_COLORS[this.squad.length % CHARACTER_COLORS.length];
-    this.squad.push(new Character(this, this.leaderPos.x, this.leaderPos.y, tint));
+    this.squad.push(new Character(this, this.leaderPos.x, this.leaderPos.y, tint, {}, isLeader));
   }
 
   /** Draws the formation's topology: a smooth ring for circle, link lines between members otherwise. */

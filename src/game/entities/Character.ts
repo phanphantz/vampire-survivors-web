@@ -27,6 +27,11 @@ const HEALTH_BAR_HEIGHT = 5;
 const TURN_RATE_RAD_PER_SEC = Math.PI * 3; // faces its current running direction, not instantly
 const MIN_MOVE_DIST_FOR_TURN = 0.5; // px; ignore jitter when basically at the target already
 const SPRITE_SCALE = CHARACTER_DISPLAY_HEIGHT / CHARACTER_FRAME_HEIGHT;
+const MOVEMENT_ARROW_OFFSET = 26; // px above the sprite's head, clear of the health bar
+const MOVEMENT_ARROW_LENGTH = 14;
+const MOVEMENT_ARROW_HEAD_SIZE = 6;
+const MOVEMENT_ARROW_HEAD_SPREAD_RAD = Math.PI / 6;
+const MOVEMENT_ARROW_COLOR = 0xfacc15;
 
 export class Character {
   sprite: Phaser.Physics.Arcade.Sprite;
@@ -34,21 +39,32 @@ export class Character {
   maxHp = 30;
   hp = this.maxHp;
   aimDirection: Vec2 = { x: 1, y: 0 };
+  readonly isLeader: boolean;
 
   private facingAngle = Math.PI / 2; // radians; drives which of the 8 idle animations plays, not sprite.rotation
   private currentDirectionIndex = -1;
   private aimIndicator: Phaser.GameObjects.Graphics;
   private healthBar: Phaser.GameObjects.Graphics;
+  private movementArrow: Phaser.GameObjects.Graphics | null = null;
   private lastFiredAt = -Infinity;
 
-  constructor(scene: Phaser.Scene, x: number, y: number, tint: number, stats: Partial<CharacterStats> = {}) {
+  constructor(
+    scene: Phaser.Scene,
+    x: number,
+    y: number,
+    tint: number,
+    stats: Partial<CharacterStats> = {},
+    isLeader = false,
+  ) {
     this.stats = { ...DEFAULT_STATS, ...stats };
+    this.isLeader = isLeader;
     this.sprite = scene.physics.add.sprite(x, y, CHARACTER_TEXTURE);
     this.sprite.setScale(SPRITE_SCALE);
     this.sprite.setTint(tint);
     this.playDirection(angleToDirection8(this.facingAngle));
     this.aimIndicator = scene.add.graphics().setDepth(5);
     this.healthBar = scene.add.graphics().setDepth(6);
+    if (this.isLeader) this.movementArrow = scene.add.graphics().setDepth(7);
   }
 
   /**
@@ -120,11 +136,45 @@ export class Character {
     const barColor = frac > 0.5 ? 0x4ade80 : frac > 0.25 ? 0xfacc15 : 0xef4444;
     this.healthBar.fillStyle(barColor, 1);
     this.healthBar.fillRect(barX, barY, HEALTH_BAR_WIDTH * frac, HEALTH_BAR_HEIGHT);
+
+    if (this.movementArrow) this.drawMovementArrow(x, barY);
+  }
+
+  /**
+   * Leader-only chevron, floating above the health bar, pointing along facingAngle — the
+   * direction moveToward() last actually turned this character to face, which (unlike
+   * aimDirection) keeps pointing the way the squad was last walked even after it stops.
+   */
+  private drawMovementArrow(x: number, healthBarY: number) {
+    const arrow = this.movementArrow!;
+    arrow.clear();
+
+    const originY = healthBarY - MOVEMENT_ARROW_OFFSET;
+    const angle = this.facingAngle;
+    const tipX = x + Math.cos(angle) * MOVEMENT_ARROW_LENGTH;
+    const tipY = originY + Math.sin(angle) * MOVEMENT_ARROW_LENGTH;
+
+    arrow.lineStyle(2, MOVEMENT_ARROW_COLOR, 0.9);
+    arrow.lineBetween(x, originY, tipX, tipY);
+
+    const leftX = tipX - Math.cos(angle - MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
+    const leftY = tipY - Math.sin(angle - MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
+    const rightX = tipX - Math.cos(angle + MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
+    const rightY = tipY - Math.sin(angle + MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
+
+    arrow.fillStyle(MOVEMENT_ARROW_COLOR, 0.9);
+    arrow.beginPath();
+    arrow.moveTo(tipX, tipY);
+    arrow.lineTo(leftX, leftY);
+    arrow.lineTo(rightX, rightY);
+    arrow.closePath();
+    arrow.fillPath();
   }
 
   destroy() {
     this.sprite.destroy();
     this.aimIndicator.destroy();
     this.healthBar.destroy();
+    this.movementArrow?.destroy();
   }
 }
