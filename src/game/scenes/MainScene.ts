@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { SquadFormation } from '../formation/SquadFormation';
 import { MAX_SQUAD_SIZE, angleDiff, getFormationLinks } from '../formation/Formation';
 import type { Vec2 } from '../formation/Formation';
-import { Character } from '../entities/Character';
+import { Character, DEFAULT_STATS } from '../entities/Character';
 import { Stamina } from '../entities/Stamina';
 import { characterTextureKey } from './BootScene';
 import { WorldPartition } from '../world/WorldPartition';
@@ -11,7 +11,7 @@ import type { ChunkCoord } from '../world/WorldPartition';
 const SQUAD_MOVE_SPEED = 220; // px/sec
 const SPRINT_SPEED_MULTIPLIER = 1.8;
 const ENEMY_BASE_SPEED = 70;
-const ENEMY_BASE_HP = 20;
+const ENEMY_HP = DEFAULT_STATS.damage * 2; // always exactly 2 hits to kill, regardless of difficulty ramp
 const ENEMY_CONTACT_DPS = 12;
 const SPAWN_MARGIN = 60; // px outside the camera view where enemies pop in
 const CHUNK_SIZE = 500;
@@ -292,7 +292,7 @@ export class MainScene extends Phaser.Scene {
 
   private spawnEnemyAt(x: number, y: number) {
     const enemy = this.enemies.create(x, y, 'enemy') as Phaser.Physics.Arcade.Sprite;
-    enemy.setData('hp', ENEMY_BASE_HP + this.kills * 0.5);
+    enemy.setData('hp', ENEMY_HP);
   }
 
   private updateEnemies(dt: number) {
