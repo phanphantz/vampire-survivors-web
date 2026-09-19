@@ -3,11 +3,13 @@ import { SquadFormation } from '../formation/SquadFormation';
 import { MAX_SQUAD_SIZE, angleDiff, getFormationLinks } from '../formation/Formation';
 import type { Vec2 } from '../formation/Formation';
 import { Character } from '../entities/Character';
+import { Stamina } from '../entities/Stamina';
 import { characterTextureKey } from './BootScene';
 import { WorldPartition } from '../world/WorldPartition';
 import type { ChunkCoord } from '../world/WorldPartition';
 
 const SQUAD_MOVE_SPEED = 220; // px/sec
+const SPRINT_SPEED_MULTIPLIER = 1.8;
 const ENEMY_BASE_SPEED = 70;
 const ENEMY_BASE_HP = 20;
 const ENEMY_CONTACT_DPS = 12;
@@ -21,17 +23,20 @@ export class MainScene extends Phaser.Scene {
   private squad: Character[] = [];
   private leaderPos: Vec2 = { x: 0, y: 0 };
   private partition = new WorldPartition(CHUNK_SIZE, ACTIVE_RADIUS_CHUNKS);
+  private stamina = new Stamina();
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
   private numberKeys: Phaser.Input.Keyboard.Key[] = [];
   private shapeKey!: Phaser.Input.Keyboard.Key;
   private fullscreenKey!: Phaser.Input.Keyboard.Key;
+  private sprintKey!: Phaser.Input.Keyboard.Key;
 
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
   private background!: Phaser.GameObjects.TileSprite;
   private formationLinks!: Phaser.GameObjects.Graphics;
+  private staminaBar!: Phaser.GameObjects.Graphics;
 
   private nextSpawnAt = 0;
   private spawnIntervalMs = 1400;
@@ -72,10 +77,12 @@ export class MainScene extends Phaser.Scene {
     ];
     this.shapeKey = this.input.keyboard!.addKey('F');
     this.fullscreenKey = this.input.keyboard!.addKey('ENTER');
+    this.sprintKey = this.input.keyboard!.addKey('SHIFT');
 
     this.bullets = this.physics.add.group();
     this.enemies = this.physics.add.group();
     this.formationLinks = this.add.graphics().setDepth(4);
+    this.staminaBar = this.add.graphics().setScrollFactor(0).setDepth(100);
 
     this.spawnCharacter();
     this.partition.update(this.leaderPos); // seed the initial active window without spawning
@@ -99,9 +106,13 @@ export class MainScene extends Phaser.Scene {
 
     const moveDir = this.readMoveInput();
     const dt = delta / 1000;
-    this.leaderPos.x += moveDir.x * SQUAD_MOVE_SPEED * dt;
-    this.leaderPos.y += moveDir.y * SQUAD_MOVE_SPEED * dt;
+    const wantsSprint = this.sprintKey.isDown && (moveDir.x !== 0 || moveDir.y !== 0);
+    const isSprinting = this.stamina.update(wantsSprint, dt);
+    const moveSpeed = SQUAD_MOVE_SPEED * (isSprinting ? SPRINT_SPEED_MULTIPLIER : 1);
+    this.leaderPos.x += moveDir.x * moveSpeed * dt;
+    this.leaderPos.y += moveDir.y * moveSpeed * dt;
     this.formation.updateFacing(moveDir, dt);
+    this.updateStaminaBar(isSprinting);
 
     this.cameras.main.centerOn(this.leaderPos.x, this.leaderPos.y);
     this.background.setTilePosition(this.cameras.main.scrollX, this.cameras.main.scrollY);
@@ -325,8 +336,25 @@ export class MainScene extends Phaser.Scene {
       [
         `Squad: ${this.squad.length}/${MAX_SQUAD_SIZE}  Formation: ${this.formation.shape}`,
         `Kills: ${this.kills}`,
-        'Move: WASD/Arrows   Squad size: 1-5   Formation: F   Fullscreen: Enter',
+        'Move: WASD/Arrows   Sprint: Shift   Squad size: 1-5   Formation: F   Fullscreen: Enter',
       ].join('\n'),
     );
+  }
+
+  private updateStaminaBar(isSprinting: boolean) {
+    const x = 10;
+    const y = 76;
+    const width = 160;
+    const height = 10;
+
+    this.staminaBar.clear();
+    this.staminaBar.fillStyle(0x000000, 0.5);
+    this.staminaBar.fillRect(x - 2, y - 2, width + 4, height + 4);
+    this.staminaBar.fillStyle(0x2d3339, 1);
+    this.staminaBar.fillRect(x, y, width, height);
+
+    const color = this.stamina.isExhausted ? 0x64748b : isSprinting ? 0xfbbf24 : 0x38bdf8;
+    this.staminaBar.fillStyle(color, 1);
+    this.staminaBar.fillRect(x, y, width * this.stamina.fraction, height);
   }
 }
