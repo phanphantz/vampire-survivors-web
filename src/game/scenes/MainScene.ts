@@ -182,7 +182,15 @@ export class MainScene extends Phaser.Scene {
     this.formationLinks.lineStyle(2, 0x94a3b8, 0.45);
 
     if (this.formation.shape === 'circle') {
-      this.formationLinks.strokeCircle(this.leaderPos.x, this.leaderPos.y, this.formation.spacing);
+      if (this.squad.length > 0) {
+        // Centered on the members' actual (eased) positions rather than leaderPos, which can
+        // race ahead of them while moving and leave the ring visibly off-center.
+        const center = this.squad.reduce(
+          (sum, c) => ({ x: sum.x + c.sprite.x / this.squad.length, y: sum.y + c.sprite.y / this.squad.length }),
+          { x: 0, y: 0 },
+        );
+        this.formationLinks.strokeCircle(center.x, center.y, this.formation.spacing);
+      }
       return;
     }
 
