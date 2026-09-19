@@ -1,5 +1,7 @@
-import { MAX_SQUAD_SIZE, getAttackDirections, getFormationOffsets, rotateAndScale } from './Formation';
+import { MAX_SQUAD_SIZE, getAttackDirections, getFormationOffsets, rotateAndScale, rotateTowardAngle } from './Formation';
 import type { FormationShape, Vec2 } from './Formation';
+
+const DEFAULT_TURN_RATE_RAD_PER_SEC = Math.PI * 2; // a full reversal takes ~0.5s, not instant
 
 /** Framework-agnostic formation state: shape, squad size, spacing, and current facing. */
 export class SquadFormation {
@@ -7,11 +9,13 @@ export class SquadFormation {
   spacing: number;
   private count: number;
   private facingAngle = 0; // radians; 0 = facing +x
+  private turnRateRadPerSec: number;
 
-  constructor(count = 1, shape: FormationShape = 'wedge', spacing = 42) {
+  constructor(count = 1, shape: FormationShape = 'wedge', spacing = 42, turnRateRadPerSec = DEFAULT_TURN_RATE_RAD_PER_SEC) {
     this.count = clampCount(count);
     this.shape = shape;
     this.spacing = spacing;
+    this.turnRateRadPerSec = turnRateRadPerSec;
   }
 
   getCount(): number {
@@ -27,10 +31,11 @@ export class SquadFormation {
     this.shape = order[(order.indexOf(this.shape) + 1) % order.length];
   }
 
-  /** Only rotates facing when actually moving, so formation holds orientation while idle. */
-  updateFacing(moveDir: Vec2) {
+  /** Turns gradually toward the movement direction — holds its heading while idle, never snaps. */
+  updateFacing(moveDir: Vec2, dt: number) {
     if (moveDir.x === 0 && moveDir.y === 0) return;
-    this.facingAngle = Math.atan2(moveDir.y, moveDir.x);
+    const targetAngle = Math.atan2(moveDir.y, moveDir.x);
+    this.facingAngle = rotateTowardAngle(this.facingAngle, targetAngle, this.turnRateRadPerSec * dt);
   }
 
   getSlotWorldPositions(leaderPos: Vec2): Vec2[] {

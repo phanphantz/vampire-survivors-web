@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { SquadFormation } from '../formation/SquadFormation';
-import { MAX_SQUAD_SIZE, getFormationLinks } from '../formation/Formation';
+import { MAX_SQUAD_SIZE, angleDiff, getFormationLinks } from '../formation/Formation';
 import type { Vec2 } from '../formation/Formation';
 import { Character } from '../entities/Character';
 import { characterTextureKey } from './BootScene';
@@ -101,7 +101,7 @@ export class MainScene extends Phaser.Scene {
     const dt = delta / 1000;
     this.leaderPos.x += moveDir.x * SQUAD_MOVE_SPEED * dt;
     this.leaderPos.y += moveDir.y * SQUAD_MOVE_SPEED * dt;
-    this.formation.updateFacing(moveDir);
+    this.formation.updateFacing(moveDir, dt);
 
     this.cameras.main.centerOn(this.leaderPos.x, this.leaderPos.y);
     this.background.setTilePosition(this.cameras.main.scrollX, this.cameras.main.scrollY);
@@ -112,7 +112,7 @@ export class MainScene extends Phaser.Scene {
     const slots = this.formation.getSlotWorldPositions(this.leaderPos);
     const aimDirs = this.formation.getSlotAimWorldDirections();
     this.squad.forEach((character, i) => {
-      character.moveToward(slots[i]);
+      character.moveToward(slots[i], dt);
       character.setAimDirection(aimDirs[i]);
       character.updateVisuals();
       this.tryFire(character, time);
@@ -174,12 +174,17 @@ export class MainScene extends Phaser.Scene {
 
   // --- combat ----------------------------------------------------------
 
-  // Each slot fires along its formation-assigned heading (see Formation.getAttackDirections)
-  // rather than homing in on the nearest enemy — the formation shape is what decides coverage.
+  // Each slot's formation-assigned heading (see Formation.getAttackDirections) defines a wide
+  // watch arc, not a razor-precise line — within that arc and its range, it auto-targets and
+  // fires straight at the nearest enemy. The formation shape decides *where* each slot looks;
+  // targeting decides *what* it shoots once something is there.
   private tryFire(character: Character, time: number) {
     if (!character.canFire(time)) return;
 
-    const dir = character.aimDirection;
+    const target = this.findNearestEnemyInCone(character);
+    if (!target) return;
+
+    const dir = new Phaser.Math.Vector2(target.x - character.sprite.x, target.y - character.sprite.y).normalize();
     const bullet = this.bullets.get(character.sprite.x, character.sprite.y, 'bullet') as Phaser.Physics.Arcade.Sprite;
     if (!bullet) return;
     bullet.setActive(true).setVisible(true);
@@ -189,6 +194,26 @@ export class MainScene extends Phaser.Scene {
     body.setVelocity(dir.x * character.stats.bulletSpeed, dir.y * character.stats.bulletSpeed);
 
     character.markFired(time);
+  }
+
+  private findNearestEnemyInCone(character: Character): Phaser.Physics.Arcade.Sprite | null {
+    const baseAngle = Math.atan2(character.aimDirection.y, character.aimDirection.x);
+    const halfCone = Phaser.Math.DegToRad(character.stats.attackConeDeg) / 2;
+    const { x, y } = character.sprite;
+
+    let nearest: Phaser.Physics.Arcade.Sprite | null = null;
+    let nearestDist = character.stats.range;
+    for (const obj of this.enemies.getChildren()) {
+      const enemy = obj as Phaser.Physics.Arcade.Sprite;
+      if (!enemy.active) continue;
+      const dist = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
+      if (dist >= nearestDist) continue;
+      const angleToEnemy = Math.atan2(enemy.y - y, enemy.x - x);
+      if (Math.abs(angleDiff(angleToEnemy, baseAngle)) > halfCone) continue;
+      nearestDist = dist;
+      nearest = enemy;
+    }
+    return nearest;
   }
 
   private onBulletHitEnemy(bullet: Phaser.Physics.Arcade.Sprite, enemy: Phaser.Physics.Arcade.Sprite) {

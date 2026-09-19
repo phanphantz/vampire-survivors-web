@@ -138,3 +138,15 @@ export function rotateAndScale(offset: Vec2, angleRad: number, spacing: number):
     y: (offset.x * sin + offset.y * cos) * spacing,
   };
 }
+
+/** Shortest signed difference `a - b`, wrapped to [-PI, PI]. */
+export function angleDiff(a: number, b: number): number {
+  return Math.atan2(Math.sin(a - b), Math.cos(a - b));
+}
+
+/** Turns `current` toward `target` by at most `maxDelta` radians — smooth, not instant, rotation. */
+export function rotateTowardAngle(current: number, target: number, maxDelta: number): number {
+  const diff = angleDiff(target, current);
+  if (Math.abs(diff) <= maxDelta) return current + diff;
+  return current + Math.sign(diff) * maxDelta;
+}

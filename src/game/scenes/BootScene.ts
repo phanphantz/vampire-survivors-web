@@ -40,13 +40,19 @@ export class BootScene extends Phaser.Scene {
     g.destroy();
   }
 
-  /** Squad members render as a vertical rounded rectangle rather than a circle. */
+  /**
+   * Squad members render as a vertical rounded rectangle with a small "head" dot on the
+   * +x edge — since sprite rotation 0 means facing +x, that dot is what makes turning
+   * (toward movement / formation heading) visually read as the character facing somewhere.
+   */
   private makeRectTexture(key: string, width: number, height: number, color: number) {
     const g = this.add.graphics();
     g.fillStyle(color, 1);
     g.fillRoundedRect(0, 0, width, height, 4);
     g.lineStyle(2, 0xffffff, 0.35);
     g.strokeRoundedRect(1, 1, width - 2, height - 2, 3);
+    g.fillStyle(0xffffff, 0.9);
+    g.fillCircle(width - 3, height / 2, 2.5);
     g.generateTexture(key, width, height);
     g.destroy();
   }
