@@ -8,7 +8,7 @@ export interface CharacterStats {
   damage: number;
   range: number;
   bulletSpeed: number;
-  moveSmoothing: number; // fraction of the gap to the target slot closed per frame
+  moveSmoothing: number; // fraction of the gap to the target slot closed per frame; lower = a more visible, human catch-up lag when the formation reshapes, rather than snapping into place instantly
   attackConeDeg: number; // width of the firing arc around aimDirection each shot picks within
 }
 
@@ -17,7 +17,7 @@ export const DEFAULT_STATS: CharacterStats = {
   damage: 10,
   range: 240,
   bulletSpeed: 460,
-  moveSmoothing: 0.18,
+  moveSmoothing: 0.08,
   attackConeDeg: 90,
 };
 
