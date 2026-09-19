@@ -28,7 +28,6 @@ const HEALTH_BAR_WIDTH = 80;
 const HEALTH_BAR_HEIGHT = 9;
 const SPRITE_SCALE = CHARACTER_DISPLAY_HEIGHT / CHARACTER_FRAME_HEIGHT;
 const MOVEMENT_TURN_RATE_RAD_PER_SEC = Math.PI * 3; // how fast facingAngle catches up to actual movement
-const MIN_MOVE_DIST_FOR_TURN = 0.5; // px; ignore jitter when basically at the target already
 const LEADER_ARROW_TIP_DISTANCE = AIM_INDICATOR_LENGTH + 6; // pokes past the attack-cone indicator so it reads in front of it
 const LEADER_ARROW_ARM_LENGTH = 22;
 const LEADER_ARROW_SPREAD_RAD = Math.PI / 5; // how open the ">" chevron is
@@ -70,28 +69,26 @@ export class Character {
     if (this.isLeader) this.leaderArrow = scene.add.graphics().setDepth(7);
   }
 
-  /**
-   * Eases toward its formation slot. The sprite's own facing is driven entirely by aimDirection
-   * (see setAimDirection), not movement — but facingAngle is still tracked here purely for the
-   * leader's movement-direction arrow (see drawLeaderArrow).
-   *
-   * Mirrors SquadFormation's sticky-heading pattern: while actually moving, the target angle
-   * tracks the live movement direction; once movement stops (key released), the target sticks at
-   * the last direction and facingAngle keeps turning toward it every frame regardless, so a brief
-   * tap still eventually finishes the turn instead of freezing mid-way.
-   */
-  moveToward(target: { x: number; y: number }, dt: number) {
-    const dx = (target.x - this.sprite.x) * this.stats.moveSmoothing;
-    const dy = (target.y - this.sprite.y) * this.stats.moveSmoothing;
-    this.sprite.x += dx;
-    this.sprite.y += dy;
+  /** Eases toward its formation slot. The sprite's own facing is driven entirely by aimDirection (see setAimDirection), not movement. */
+  moveToward(target: { x: number; y: number }) {
+    this.sprite.x += (target.x - this.sprite.x) * this.stats.moveSmoothing;
+    this.sprite.y += (target.y - this.sprite.y) * this.stats.moveSmoothing;
+  }
 
-    if (this.isLeader) {
-      if (Math.hypot(dx, dy) > MIN_MOVE_DIST_FOR_TURN) {
-        this.targetFacingAngle = Math.atan2(dy, dx);
-      }
-      this.facingAngle = rotateTowardAngle(this.facingAngle, this.targetFacingAngle, MOVEMENT_TURN_RATE_RAD_PER_SEC * dt);
+  /**
+   * Leader-only: drives the movement-direction arrow (see drawLeaderArrow) from the raw input
+   * direction directly — not a position-delta heuristic, which misses very brief key taps whose
+   * accumulated displacement never exceeds a pixel threshold. Mirrors SquadFormation's
+   * sticky-heading pattern: while a direction is held, the target tracks it directly; once
+   * released, the target sticks and facingAngle keeps turning toward it every frame regardless,
+   * so even a brief tap eventually finishes the turn instead of never registering at all.
+   */
+  updateMovementFacing(moveDir: Vec2, dt: number) {
+    if (!this.isLeader) return;
+    if (moveDir.x !== 0 || moveDir.y !== 0) {
+      this.targetFacingAngle = Math.atan2(moveDir.y, moveDir.x);
     }
+    this.facingAngle = rotateTowardAngle(this.facingAngle, this.targetFacingAngle, MOVEMENT_TURN_RATE_RAD_PER_SEC * dt);
   }
 
   /**
@@ -169,7 +166,7 @@ export class Character {
 
   /**
    * Leader-only ">" chevron sitting just past the tip of the attack-cone indicator, tracking
-   * facingAngle (the direction moveToward() last actually turned this character to face) rather
+   * facingAngle (the direction updateMovementFacing() last actually turned this character to face) rather
    * than the attack angle — attack direction can be inverted by the shooting-direction flip (X),
    * so this marks the way the squad is actually walking, not where it's aiming.
    */
