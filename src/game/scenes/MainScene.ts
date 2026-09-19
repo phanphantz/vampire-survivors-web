@@ -343,11 +343,16 @@ export class MainScene extends Phaser.Scene {
       });
     }
 
+    const survivorCount = this.squad.length;
     this.squad = this.squad.filter((character) => {
       if (character.hp > 0) return true;
       character.destroy();
       return false;
     });
+    // A death shrinks the squad without going through setSquadSize(), so the formation's own
+    // count (and the per-slot arrays it drives) must be synced here too — otherwise it keeps
+    // computing positions/topology for the old, larger squad and survivors land in wrong slots.
+    if (this.squad.length !== survivorCount) this.formation.setCount(this.squad.length);
     if (this.squad.length === 0) this.endGame();
   }
 
