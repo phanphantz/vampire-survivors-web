@@ -6,7 +6,7 @@ export const CHARACTER_COLORS = [0x4fd1c5, 0xf6ad55, 0xb794f4, 0x68d391, 0xf687b
 export const CHARACTER_TEXTURE = 'archer';
 export const CHARACTER_FRAME_WIDTH = 112;
 export const CHARACTER_FRAME_HEIGHT = 444;
-export const CHARACTER_DISPLAY_HEIGHT = 52; // shrinks the ~444px-tall source art down to gameplay scale
+export const CHARACTER_DISPLAY_HEIGHT = 84; // shrinks the ~444px-tall source art down to gameplay scale
 
 const FRAMES_PER_DIRECTION = 4;
 const DIRECTION_COUNT = 8;

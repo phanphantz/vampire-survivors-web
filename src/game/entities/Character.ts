@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { angleToDirection8, rotateTowardAngle } from '../formation/Formation';
+import { angleToDirection8 } from '../formation/Formation';
 import type { Vec2 } from '../formation/Formation';
 import { CHARACTER_DISPLAY_HEIGHT, CHARACTER_FRAME_HEIGHT, CHARACTER_TEXTURE, idleAnimKey } from '../scenes/BootScene';
 
@@ -21,11 +21,9 @@ export const DEFAULT_STATS: CharacterStats = {
   attackConeDeg: 90,
 };
 
-const AIM_INDICATOR_LENGTH = 40;
-const HEALTH_BAR_WIDTH = 32;
-const HEALTH_BAR_HEIGHT = 5;
-const TURN_RATE_RAD_PER_SEC = Math.PI * 3; // faces its current running direction, not instantly
-const MIN_MOVE_DIST_FOR_TURN = 0.5; // px; ignore jitter when basically at the target already
+const AIM_INDICATOR_LENGTH = 56;
+const HEALTH_BAR_WIDTH = 40;
+const HEALTH_BAR_HEIGHT = 6;
 const SPRITE_SCALE = CHARACTER_DISPLAY_HEIGHT / CHARACTER_FRAME_HEIGHT;
 
 export class Character {
@@ -35,7 +33,6 @@ export class Character {
   hp = this.maxHp;
   aimDirection: Vec2 = { x: 1, y: 0 };
 
-  private facingAngle = Math.PI / 2; // radians; drives which of the 8 idle animations plays, not sprite.rotation
   private currentDirectionIndex = -1;
   private aimIndicator: Phaser.GameObjects.Graphics;
   private healthBar: Phaser.GameObjects.Graphics;
@@ -46,37 +43,33 @@ export class Character {
     this.sprite = scene.physics.add.sprite(x, y, CHARACTER_TEXTURE);
     this.sprite.setScale(SPRITE_SCALE);
     this.sprite.setTint(tint);
-    this.playDirection(angleToDirection8(this.facingAngle));
+    this.playDirectionForAim();
     this.aimIndicator = scene.add.graphics().setDepth(5);
     this.healthBar = scene.add.graphics().setDepth(6);
   }
 
-  /**
-   * Eases toward its formation slot and turns to face the direction it's currently running,
-   * gradually. The sprite itself is never rotated (it's pre-rendered 8-directional art, not a
-   * shape) — instead this picks which directional idle animation to play.
-   */
-  moveToward(target: { x: number; y: number }, dt: number) {
-    const dx = (target.x - this.sprite.x) * this.stats.moveSmoothing;
-    const dy = (target.y - this.sprite.y) * this.stats.moveSmoothing;
-    this.sprite.x += dx;
-    this.sprite.y += dy;
-
-    if (Math.hypot(dx, dy) > MIN_MOVE_DIST_FOR_TURN) {
-      const targetAngle = Math.atan2(dy, dx);
-      this.facingAngle = rotateTowardAngle(this.facingAngle, targetAngle, TURN_RATE_RAD_PER_SEC * dt);
-      this.playDirection(angleToDirection8(this.facingAngle));
-    }
+  /** Eases toward its formation slot. The sprite's facing is driven entirely by aimDirection (see setAimDirection), not movement. */
+  moveToward(target: { x: number; y: number }) {
+    this.sprite.x += (target.x - this.sprite.x) * this.stats.moveSmoothing;
+    this.sprite.y += (target.y - this.sprite.y) * this.stats.moveSmoothing;
   }
 
-  private playDirection(directionIndex: number) {
+  /**
+   * Sets where this slot is watching/firing, and keeps the displayed directional idle animation
+   * in lock-step with it — the character always visually faces its attack angle, never its
+   * movement direction. aimDirection already turns gradually (see SquadFormation's chain-follow),
+   * so this doesn't need its own smoothing on top.
+   */
+  setAimDirection(dir: Vec2) {
+    this.aimDirection = dir;
+    this.playDirectionForAim();
+  }
+
+  private playDirectionForAim() {
+    const directionIndex = angleToDirection8(Math.atan2(this.aimDirection.y, this.aimDirection.x));
     if (directionIndex === this.currentDirectionIndex) return;
     this.currentDirectionIndex = directionIndex;
     this.sprite.play(idleAnimKey(directionIndex));
-  }
-
-  setAimDirection(dir: Vec2) {
-    this.aimDirection = dir;
   }
 
   canFire(timeMs: number): boolean {
