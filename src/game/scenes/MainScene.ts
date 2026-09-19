@@ -111,7 +111,7 @@ export class MainScene extends Phaser.Scene {
     const moveSpeed = SQUAD_MOVE_SPEED * (isSprinting ? SPRINT_SPEED_MULTIPLIER : 1);
     this.leaderPos.x += moveDir.x * moveSpeed * dt;
     this.leaderPos.y += moveDir.y * moveSpeed * dt;
-    this.formation.updateFacing(moveDir, dt);
+    this.formation.update(moveDir, this.leaderPos, dt);
     this.updateStaminaBar(isSprinting);
 
     this.cameras.main.centerOn(this.leaderPos.x, this.leaderPos.y);
