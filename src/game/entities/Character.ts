@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
-import { rotateTowardAngle } from '../formation/Formation';
+import { angleToDirection8, rotateTowardAngle } from '../formation/Formation';
 import type { Vec2 } from '../formation/Formation';
+import { CHARACTER_DISPLAY_HEIGHT, CHARACTER_FRAME_HEIGHT, CHARACTER_TEXTURE, idleAnimKey } from '../scenes/BootScene';
 
 export interface CharacterStats {
   fireRateMs: number;
@@ -20,11 +21,12 @@ export const DEFAULT_STATS: CharacterStats = {
   attackConeDeg: 90,
 };
 
-const AIM_INDICATOR_LENGTH = 34;
-const HEALTH_BAR_WIDTH = 26;
+const AIM_INDICATOR_LENGTH = 40;
+const HEALTH_BAR_WIDTH = 32;
 const HEALTH_BAR_HEIGHT = 5;
 const TURN_RATE_RAD_PER_SEC = Math.PI * 3; // faces its current running direction, not instantly
 const MIN_MOVE_DIST_FOR_TURN = 0.5; // px; ignore jitter when basically at the target already
+const SPRITE_SCALE = CHARACTER_DISPLAY_HEIGHT / CHARACTER_FRAME_HEIGHT;
 
 export class Character {
   sprite: Phaser.Physics.Arcade.Sprite;
@@ -33,18 +35,27 @@ export class Character {
   hp = this.maxHp;
   aimDirection: Vec2 = { x: 1, y: 0 };
 
+  private facingAngle = Math.PI / 2; // radians; drives which of the 8 idle animations plays, not sprite.rotation
+  private currentDirectionIndex = -1;
   private aimIndicator: Phaser.GameObjects.Graphics;
   private healthBar: Phaser.GameObjects.Graphics;
   private lastFiredAt = -Infinity;
 
-  constructor(scene: Phaser.Scene, x: number, y: number, textureKey: string, stats: Partial<CharacterStats> = {}) {
+  constructor(scene: Phaser.Scene, x: number, y: number, tint: number, stats: Partial<CharacterStats> = {}) {
     this.stats = { ...DEFAULT_STATS, ...stats };
-    this.sprite = scene.physics.add.sprite(x, y, textureKey);
+    this.sprite = scene.physics.add.sprite(x, y, CHARACTER_TEXTURE);
+    this.sprite.setScale(SPRITE_SCALE);
+    this.sprite.setTint(tint);
+    this.playDirection(angleToDirection8(this.facingAngle));
     this.aimIndicator = scene.add.graphics().setDepth(5);
     this.healthBar = scene.add.graphics().setDepth(6);
   }
 
-  /** Eases toward its formation slot and turns to face the direction it's currently running, gradually. */
+  /**
+   * Eases toward its formation slot and turns to face the direction it's currently running,
+   * gradually. The sprite itself is never rotated (it's pre-rendered 8-directional art, not a
+   * shape) — instead this picks which directional idle animation to play.
+   */
   moveToward(target: { x: number; y: number }, dt: number) {
     const dx = (target.x - this.sprite.x) * this.stats.moveSmoothing;
     const dy = (target.y - this.sprite.y) * this.stats.moveSmoothing;
@@ -53,8 +64,15 @@ export class Character {
 
     if (Math.hypot(dx, dy) > MIN_MOVE_DIST_FOR_TURN) {
       const targetAngle = Math.atan2(dy, dx);
-      this.sprite.rotation = rotateTowardAngle(this.sprite.rotation, targetAngle, TURN_RATE_RAD_PER_SEC * dt);
+      this.facingAngle = rotateTowardAngle(this.facingAngle, targetAngle, TURN_RATE_RAD_PER_SEC * dt);
+      this.playDirection(angleToDirection8(this.facingAngle));
     }
+  }
+
+  private playDirection(directionIndex: number) {
+    if (directionIndex === this.currentDirectionIndex) return;
+    this.currentDirectionIndex = directionIndex;
+    this.sprite.play(idleAnimKey(directionIndex));
   }
 
   setAimDirection(dir: Vec2) {
@@ -93,7 +111,7 @@ export class Character {
 
     const frac = Phaser.Math.Clamp(this.hp / this.maxHp, 0, 1);
     const barX = x - HEALTH_BAR_WIDTH / 2;
-    const barY = y - this.sprite.height / 2 - 10;
+    const barY = y - this.sprite.displayHeight / 2 - 10;
     this.healthBar.clear();
     this.healthBar.fillStyle(0x000000, 0.5);
     this.healthBar.fillRect(barX - 1, barY - 1, HEALTH_BAR_WIDTH + 2, HEALTH_BAR_HEIGHT + 2);

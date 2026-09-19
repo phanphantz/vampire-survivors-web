@@ -212,3 +212,13 @@ export function rotateTowardAngle(current: number, target: number, maxDelta: num
   if (Math.abs(diff) <= maxDelta) return current + diff;
   return current + Math.sign(diff) * maxDelta;
 }
+
+/**
+ * Buckets a screen-space angle (0 = +x/East, increasing clockwise) into one of 8 compass
+ * directions, ordered N, NE, E, SE, S, SW, W, NW (0-7) — matching the layout of an 8-directional
+ * sprite sheet laid out in that order.
+ */
+export function angleToDirection8(angleRad: number): number {
+  const steps = Math.round((angleRad + Math.PI / 2) / (Math.PI / 4));
+  return ((steps % 8) + 8) % 8;
+}

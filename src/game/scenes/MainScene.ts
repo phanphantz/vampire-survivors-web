@@ -4,7 +4,7 @@ import { MAX_SQUAD_SIZE, angleDiff, getFormationLinks } from '../formation/Forma
 import type { Vec2 } from '../formation/Formation';
 import { Character, DEFAULT_STATS } from '../entities/Character';
 import { Stamina } from '../entities/Stamina';
-import { characterTextureKey } from './BootScene';
+import { CHARACTER_COLORS } from './BootScene';
 import { WorldPartition } from '../world/WorldPartition';
 import type { ChunkCoord } from '../world/WorldPartition';
 
@@ -202,8 +202,8 @@ export class MainScene extends Phaser.Scene {
   }
 
   private spawnCharacter() {
-    const textureKey = characterTextureKey(this.squad.length);
-    this.squad.push(new Character(this, this.leaderPos.x, this.leaderPos.y, textureKey));
+    const tint = CHARACTER_COLORS[this.squad.length % CHARACTER_COLORS.length];
+    this.squad.push(new Character(this, this.leaderPos.x, this.leaderPos.y, tint));
   }
 
   /** Draws the formation's topology: a smooth ring for circle, link lines between members otherwise. */
