@@ -33,7 +33,6 @@ const LEADER_ARROW_ARM_LENGTH = 22;
 const LEADER_ARROW_SPREAD_RAD = Math.PI / 5; // how open the ">" chevron is
 const LEADER_ARROW_COLOR = 0x22d3ee;
 const LEADER_ARROW_OUTLINE_COLOR = 0x0f172a;
-const DIRECTION_NAMES = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
 export class Character {
   sprite: Phaser.Physics.Arcade.Sprite;
@@ -49,7 +48,6 @@ export class Character {
   private aimIndicator: Phaser.GameObjects.Graphics;
   private healthBar: Phaser.GameObjects.Graphics;
   private leaderArrow: Phaser.GameObjects.Graphics | null = null;
-  private debugLabel: Phaser.GameObjects.Text; // TEMP: diagnosing body-vs-cone direction mismatch report
   private lastFiredAt = -Infinity;
 
   constructor(
@@ -69,10 +67,6 @@ export class Character {
     this.aimIndicator = scene.add.graphics().setDepth(-1); // behind the sprite, not in front of it
     this.healthBar = scene.add.graphics().setDepth(6);
     if (this.isLeader) this.leaderArrow = scene.add.graphics().setDepth(7);
-    this.debugLabel = scene.add
-      .text(x, y, '', { fontFamily: 'monospace', fontSize: '14px', color: '#ffff00', backgroundColor: '#000000' })
-      .setOrigin(0.5)
-      .setDepth(50);
   }
 
   /** Eases toward its formation slot. The sprite's own facing is driven entirely by aimDirection (see setAimDirection), not movement. */
@@ -129,12 +123,6 @@ export class Character {
 
     const baseAngle = Math.atan2(this.aimDirection.y, this.aimDirection.x);
     const halfCone = Phaser.Math.DegToRad(this.stats.attackConeDeg) / 2;
-
-    // TEMP: shows the exact cone angle (deg) and which direction-bucket/animation is currently
-    // playing, so a screenshot can directly prove whether a mismatch is in the angle math or in
-    // how the sprite renders it.
-    this.debugLabel.setPosition(x, y - this.sprite.displayHeight / 2 - 34);
-    this.debugLabel.setText(`${Math.round(Phaser.Math.RadToDeg(baseAngle))}° ${DIRECTION_NAMES[this.currentDirectionIndex]}`);
 
     this.aimIndicator.clear();
 
@@ -210,6 +198,5 @@ export class Character {
     this.aimIndicator.destroy();
     this.healthBar.destroy();
     this.leaderArrow?.destroy();
-    this.debugLabel.destroy();
   }
 }
