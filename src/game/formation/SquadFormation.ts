@@ -8,7 +8,8 @@ export class SquadFormation {
   shape: FormationShape;
   spacing: number;
   private count: number;
-  private facingAngle = 0; // radians; 0 = facing +x
+  private facingAngle = 0; // radians; 0 = facing +x — smoothed, catches up to targetFacingAngle
+  private targetFacingAngle = 0; // last commanded heading; sticks after the key is released
   private turnRateRadPerSec: number;
 
   constructor(count = 1, shape: FormationShape = 'wedge', spacing = 42, turnRateRadPerSec = DEFAULT_TURN_RATE_RAD_PER_SEC) {
@@ -31,11 +32,16 @@ export class SquadFormation {
     this.shape = order[(order.indexOf(this.shape) + 1) % order.length];
   }
 
-  /** Turns gradually toward the movement direction — holds its heading while idle, never snaps. */
+  /**
+   * A key press commits a heading: while held, the target tracks the input directly; once
+   * released, the target sticks at the last direction and the formation keeps turning toward
+   * it every frame regardless, so even a brief tap eventually brings everyone fully around.
+   */
   updateFacing(moveDir: Vec2, dt: number) {
-    if (moveDir.x === 0 && moveDir.y === 0) return;
-    const targetAngle = Math.atan2(moveDir.y, moveDir.x);
-    this.facingAngle = rotateTowardAngle(this.facingAngle, targetAngle, this.turnRateRadPerSec * dt);
+    if (moveDir.x !== 0 || moveDir.y !== 0) {
+      this.targetFacingAngle = Math.atan2(moveDir.y, moveDir.x);
+    }
+    this.facingAngle = rotateTowardAngle(this.facingAngle, this.targetFacingAngle, this.turnRateRadPerSec * dt);
   }
 
   getSlotWorldPositions(leaderPos: Vec2): Vec2[] {
