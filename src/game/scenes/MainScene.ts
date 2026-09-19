@@ -32,18 +32,22 @@ export class MainScene extends Phaser.Scene {
   private flipKey!: Phaser.Input.Keyboard.Key;
   private fullscreenKey!: Phaser.Input.Keyboard.Key;
   private sprintKey!: Phaser.Input.Keyboard.Key;
+  private pauseKey!: Phaser.Input.Keyboard.Key;
 
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
   private background!: Phaser.GameObjects.TileSprite;
   private formationLinks!: Phaser.GameObjects.Graphics;
   private staminaBar!: Phaser.GameObjects.Graphics;
+  private pauseOverlay!: Phaser.GameObjects.Rectangle;
+  private pauseText!: Phaser.GameObjects.Text;
 
   private nextSpawnAt = 0;
   private spawnIntervalMs = 1400;
   private kills = 0;
   private hud!: Phaser.GameObjects.Text;
   private gameOver = false;
+  private isPaused = false;
 
   constructor() {
     super('main');
@@ -80,6 +84,7 @@ export class MainScene extends Phaser.Scene {
     this.flipKey = this.input.keyboard!.addKey('X');
     this.fullscreenKey = this.input.keyboard!.addKey('ENTER');
     this.sprintKey = this.input.keyboard!.addKey('SHIFT');
+    this.pauseKey = this.input.keyboard!.addKey('ESC');
 
     this.bullets = this.physics.add.group();
     this.enemies = this.physics.add.group();
@@ -99,10 +104,35 @@ export class MainScene extends Phaser.Scene {
       color: '#e5e7eb',
     });
     this.hud.setScrollFactor(0).setDepth(100);
+
+    this.pauseOverlay = this.add
+      .rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.6)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(200)
+      .setVisible(false);
+    this.pauseText = this.add
+      .text(this.scale.width / 2, this.scale.height / 2, 'PAUSED\nPress Esc to resume', {
+        fontFamily: 'monospace',
+        fontSize: '28px',
+        color: '#e5e7eb',
+        align: 'center',
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(201)
+      .setVisible(false);
+    this.scale.on(Phaser.Scale.Events.RESIZE, (size: Phaser.Structs.Size) => {
+      this.pauseOverlay.setSize(size.width, size.height);
+      this.pauseText.setPosition(size.width / 2, size.height / 2);
+    });
   }
 
   update(time: number, delta: number) {
     if (this.gameOver) return;
+
+    if (Phaser.Input.Keyboard.JustDown(this.pauseKey)) this.togglePause();
+    if (this.isPaused) return;
 
     if (Phaser.Input.Keyboard.JustDown(this.fullscreenKey)) this.scale.toggleFullscreen();
 
@@ -336,6 +366,17 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  private togglePause() {
+    this.isPaused = !this.isPaused;
+    if (this.isPaused) {
+      this.physics.pause();
+    } else {
+      this.physics.resume();
+    }
+    this.pauseOverlay.setVisible(this.isPaused);
+    this.pauseText.setVisible(this.isPaused);
+  }
+
   private endGame() {
     this.gameOver = true;
     this.physics.pause();
@@ -355,7 +396,7 @@ export class MainScene extends Phaser.Scene {
       [
         `Squad: ${this.squad.length}/${MAX_SQUAD_SIZE}  Formation: ${this.formation.shape}${this.formation.isFlipped() ? ' (flipped)' : ''}`,
         `Kills: ${this.kills}`,
-        'Move: WASD/Arrows   Sprint: Shift   Squad size: 1-5   Formation: F   Flip fire: X   Fullscreen: Enter',
+        'Move: WASD/Arrows   Sprint: Shift   Squad size: 1-5   Formation: F   Flip fire: X   Fullscreen: Enter   Pause: Esc',
       ].join('\n'),
     );
   }
