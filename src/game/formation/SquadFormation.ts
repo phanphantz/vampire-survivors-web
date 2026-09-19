@@ -1,24 +1,23 @@
-import { MAX_SQUAD_SIZE, angleDiff, getAttackDirections, getFormationOffsets, rotateAndScale, rotateTowardAngle } from './Formation';
-import type { FormationShape, Vec2 } from './Formation';
+import { MAX_SQUAD_SIZE, getAttackDirections, getFormationLinks, getFormationOffsets, rotateAndScale, rotateTowardAngle } from './Formation';
+import type { FormationLink, FormationShape, Vec2 } from './Formation';
 
 const DEFAULT_TURN_RATE_RAD_PER_SEC = Math.PI * 2; // a full reversal takes ~0.5s, not instant
+const CHAIN_TURN_RATE_FACTOR = 0.7; // each link chases its parent a bit slower than the head turns, so lag compounds down the line
 
-// Column/wedge offsets encode "distance behind the front" as |offset.x| formation-spacing units.
-// Rather than rotate every slot rigidly around the same instantaneous angle, each slot is placed
-// by walking `|offset.x| * spacing` back along the leader's actual recent path — the front reacts
-// immediately, the back only catches up once its point in the path reaches there, producing a
-// whip-like sequential swing on rotation. Indexed by distance (not time) so a slot's position
-// stays put once the leader stops, instead of collapsing back onto it. Circle has no
-// front-to-back structure, so it's exempt (see below) and just rotates rigidly.
-const TRAIL_RETENTION_MULTIPLIER = 3; // keep enough path behind for the largest offset, with headroom
-
-interface TrailSample {
-  dist: number; // cumulative distance the leader had traveled when this sample was recorded
-  pos: Vec2;
-  angle: number;
-}
-
-/** Framework-agnostic formation state: shape, squad size, spacing, current facing, and the leader's path trail. */
+/**
+ * Framework-agnostic formation state: shape, squad size, spacing, current facing, and a
+ * per-slot orientation chain.
+ *
+ * Column/wedge slots don't just rotate rigidly around the leader: each non-head slot's own
+ * orientation smoothly chases the slot it's linked to (see Formation.getFormationLinks, whose
+ * `from` is always the more-forward slot), and its position is placed a fixed link-length
+ * behind that parent along the parent's *current* orientation. Because the chase runs every
+ * frame off elapsed time — not distance traveled — a heading change always fully propagates
+ * down the chain eventually, even from a brief tap that barely moves the squad; it just does so
+ * with a cascading delay, front to back, like a whip. Once everything has caught up this
+ * reduces to exactly the plain rigid-offset formation. Circle has no front-to-back structure,
+ * so it's exempt and just rotates rigidly as one ring.
+ */
 export class SquadFormation {
   shape: FormationShape;
   spacing: number;
@@ -26,14 +25,17 @@ export class SquadFormation {
   private facingAngle = 0; // radians; 0 = facing +x — smoothed, catches up to targetFacingAngle
   private targetFacingAngle = 0; // last commanded heading; sticks after the key is released
   private turnRateRadPerSec: number;
-  private traveledDistance = 0;
-  private trail: TrailSample[] = [];
+  private chainTurnRateRadPerSec: number;
+
+  private slotAngles: number[] = [];
+  private slotPositions: Vec2[] = [];
 
   constructor(count = 1, shape: FormationShape = 'wedge', spacing = 42, turnRateRadPerSec = DEFAULT_TURN_RATE_RAD_PER_SEC) {
     this.count = clampCount(count);
     this.shape = shape;
     this.spacing = spacing;
     this.turnRateRadPerSec = turnRateRadPerSec;
+    this.chainTurnRateRadPerSec = turnRateRadPerSec * CHAIN_TURN_RATE_FACTOR;
   }
 
   getCount(): number {
@@ -42,6 +44,10 @@ export class SquadFormation {
 
   setCount(count: number) {
     this.count = clampCount(count);
+    // Truncate rather than leave stale entries — if the squad grows again later, a fresh
+    // slot is re-seeded in place instead of resuming some long-dead cached angle.
+    this.slotAngles.length = this.count;
+    this.slotPositions.length = this.count;
   }
 
   cycleShape() {
@@ -50,7 +56,7 @@ export class SquadFormation {
   }
 
   /**
-   * Advances facing and records the leader's path trail. Call once per frame before reading
+   * Advances facing and the per-slot orientation chain. Call once per frame before reading
    * slot positions/aim directions.
    *
    * A key press commits a heading: while held, the target tracks the input directly; once
@@ -63,31 +69,20 @@ export class SquadFormation {
     }
     this.facingAngle = rotateTowardAngle(this.facingAngle, this.targetFacingAngle, this.turnRateRadPerSec * dt);
 
-    const last = this.trail[this.trail.length - 1];
-    if (last) {
-      this.traveledDistance += Math.hypot(leaderPos.x - last.pos.x, leaderPos.y - last.pos.y);
-    }
-    this.trail.push({ dist: this.traveledDistance, pos: { x: leaderPos.x, y: leaderPos.y }, angle: this.facingAngle });
-
-    const maxBehind = this.spacing * MAX_SQUAD_SIZE * TRAIL_RETENTION_MULTIPLIER;
-    while (this.trail.length > 2 && this.traveledDistance - this.trail[0].dist > maxBehind) {
-      this.trail.shift();
-    }
+    // Kept warm even while shape is 'circle' (unused there) so the chain is already valid the
+    // instant the shape is switched mid-frame — cycleShape() runs after this in MainScene's
+    // update loop, and slot reads must never lag a frame behind the shape they're reading for.
+    this.updateChain(leaderPos, dt);
   }
 
   getSlotWorldPositions(leaderPos: Vec2): Vec2[] {
-    const offsets = getFormationOffsets(this.shape, this.count);
     if (this.shape === 'circle') {
-      return offsets.map((offset) => {
+      return getFormationOffsets(this.shape, this.count).map((offset) => {
         const r = rotateAndScale(offset, this.facingAngle, this.spacing);
         return { x: leaderPos.x + r.x, y: leaderPos.y + r.y };
       });
     }
-    return offsets.map((offset) => {
-      const pose = this.sampleBehind(Math.abs(offset.x) * this.spacing);
-      const r = rotateAndScale({ x: 0, y: offset.y }, pose.angle, this.spacing);
-      return { x: pose.pos.x + r.x, y: pose.pos.y + r.y };
-    });
+    return this.slotPositions.slice(0, this.count);
   }
 
   /** Per-slot aim direction (unit vectors) reflecting each formation's attack pattern. */
@@ -96,50 +91,45 @@ export class SquadFormation {
     if (this.shape === 'circle') {
       return dirs.map((dir) => rotateAndScale(dir, this.facingAngle, 1));
     }
+    return dirs.map((dir, i) => rotateAndScale(dir, this.slotAngles[i] ?? this.facingAngle, 1));
+  }
+
+  /** Relaxes each non-head slot's orientation toward its parent's, and places it a fixed link-length behind. */
+  private updateChain(leaderPos: Vec2, dt: number) {
     const offsets = getFormationOffsets(this.shape, this.count);
-    return dirs.map((dir, i) => {
-      const pose = this.sampleBehind(Math.abs(offsets[i].x) * this.spacing);
-      return rotateAndScale(dir, pose.angle, 1);
-    });
-  }
+    const parents = getFollowParents(this.shape, this.count);
 
-  /**
-   * {pos, angle} exactly `distanceBehind` px back along the leader's traveled path. If the
-   * leader hasn't traveled far enough yet (e.g. just spawned), extrapolates straight back from
-   * the oldest known pose instead of clamping — so the formation still has correct static
-   * spacing even before the leader has taken a single step.
-   */
-  private sampleBehind(distanceBehind: number): { pos: Vec2; angle: number } {
-    const targetDist = this.traveledDistance - distanceBehind;
-    const oldest = this.trail[0];
-    if (!oldest) return { pos: { x: 0, y: 0 }, angle: this.facingAngle };
+    this.slotAngles[0] = this.facingAngle;
+    this.slotPositions[0] = { x: leaderPos.x, y: leaderPos.y };
 
-    if (targetDist <= oldest.dist) {
-      const shortfall = oldest.dist - targetDist;
-      return {
-        pos: {
-          x: oldest.pos.x - Math.cos(oldest.angle) * shortfall,
-          y: oldest.pos.y - Math.sin(oldest.angle) * shortfall,
-        },
-        angle: oldest.angle,
-      };
-    }
-
-    for (let i = this.trail.length - 1; i > 0; i--) {
-      const a = this.trail[i - 1];
-      const b = this.trail[i];
-      if (targetDist >= a.dist && targetDist <= b.dist) {
-        const span = b.dist - a.dist;
-        const frac = span > 1e-6 ? (targetDist - a.dist) / span : 0;
-        return {
-          pos: { x: a.pos.x + (b.pos.x - a.pos.x) * frac, y: a.pos.y + (b.pos.y - a.pos.y) * frac },
-          angle: a.angle + angleDiff(b.angle, a.angle) * frac,
-        };
+    for (let i = 1; i < this.count; i++) {
+      const parent = parents[i];
+      if (parent === null) {
+        // No defined link (shouldn't happen for column/wedge, but stay safe): snap to the rigid offset.
+        const r = rotateAndScale(offsets[i], this.facingAngle, this.spacing);
+        this.slotAngles[i] = this.facingAngle;
+        this.slotPositions[i] = { x: leaderPos.x + r.x, y: leaderPos.y + r.y };
+        continue;
       }
+
+      if (this.slotAngles[i] === undefined) this.slotAngles[i] = this.slotAngles[parent]; // seed newly-added slots in place, no pop-in
+
+      this.slotAngles[i] = rotateTowardAngle(this.slotAngles[i], this.slotAngles[parent], this.chainTurnRateRadPerSec * dt);
+
+      const localLink = { x: offsets[i].x - offsets[parent].x, y: offsets[i].y - offsets[parent].y };
+      const r = rotateAndScale(localLink, this.slotAngles[parent], this.spacing);
+      const parentPos = this.slotPositions[parent];
+      this.slotPositions[i] = { x: parentPos.x + r.x, y: parentPos.y + r.y };
     }
-    const latest = this.trail[this.trail.length - 1];
-    return { pos: latest.pos, angle: latest.angle };
   }
+}
+
+/** For each slot, the index of the more-forward slot it's linked to (null for the head). */
+function getFollowParents(shape: FormationShape, count: number): (number | null)[] {
+  const parents: (number | null)[] = new Array(count).fill(null);
+  const links: FormationLink[] = shape === 'circle' ? [] : getFormationLinks(shape, count);
+  for (const link of links) parents[link.to] = link.from;
+  return parents;
 }
 
 function clampCount(count: number): number {
