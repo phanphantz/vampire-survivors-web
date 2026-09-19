@@ -35,8 +35,7 @@ const LEADER_ARROW_COLOR = 0x22d3ee;
 const LEADER_ARROW_OUTLINE_COLOR = 0x0f172a;
 const FOLLOWER_START_MOVE_DELAY_SEC = 0.2; // human reaction-time pause before a follower reacts to the squad setting off from a standstill
 const LEADER_MOVE_RESPONSE_RATE = 20; // ~0.05s time constant — the player's own input should feel immediate, not eased like the followers
-const RESHAPE_RESPONSE_RATE = 2.5; // ~0.4s time constant while re-forming after a shape/flip/size change — slower than normal tracking, but not sluggish
-const RESHAPE_SLOWDOWN_DURATION_SEC = 1.2; // how long the slower rate applies before reverting to normal speed
+const RESHAPE_HOLD_SEC = 0.4; // followers freeze for a beat when the formation shape/flip/size changes, then resume normal-speed tracking
 
 // Y-sort: depth tracks the sprite's foot position (its lower edge, not its center) every frame,
 // so a character standing further down the screen — visually closer to the viewer — always
@@ -66,8 +65,12 @@ export class Character {
   private healthBar: Phaser.GameObjects.Graphics;
   private leaderArrow: Phaser.GameObjects.Graphics | null = null;
   private lastFiredAt = -Infinity;
-  private startMoveDelayRemaining = 0; // followers only; counts down before they react to the squad setting off
-  private reshapeSlowdownRemaining = 0; // followers only; counts down while re-forming after a shape/flip/size change
+  // Followers only: holds position (moveToward is a no-op) while > 0. Both the start-move
+  // reaction pause and the reshape pause just set this — deliberately not two separate "slow
+  // rate for N seconds" mechanisms, since a temporary slow rate lets the gap to a still-moving
+  // target grow, then snaps to normal speed the instant the timer expires. A plain hold-then-
+  // resume-at-normal-speed never has that handoff to snap on.
+  private holdRemaining = 0;
 
   constructor(
     scene: Phaser.Scene,
@@ -94,43 +97,37 @@ export class Character {
    * in perfect lockstep with the leader like a drone.
    */
   triggerStartMoveDelay() {
-    if (!this.isLeader) this.startMoveDelayRemaining = FOLLOWER_START_MOVE_DELAY_SEC;
+    if (!this.isLeader) this.holdRemaining = Math.max(this.holdRemaining, FOLLOWER_START_MOVE_DELAY_SEC);
   }
 
   /**
    * Followers only: called when the formation shape, flip, or squad size changes, so re-forming
-   * into the new layout takes a deliberate, visible duration instead of snapping into place at
-   * the normal (fast) tracking speed. The leader is excluded — see moveToward for why.
+   * into the new layout takes a visible beat instead of snapping into place immediately. The
+   * leader is excluded — its target tracks live player input and must never be held.
    */
   triggerReshapeDelay() {
-    if (!this.isLeader) this.reshapeSlowdownRemaining = RESHAPE_SLOWDOWN_DURATION_SEC;
+    if (!this.isLeader) this.holdRemaining = Math.max(this.holdRemaining, RESHAPE_HOLD_SEC);
   }
 
   /**
    * Eases toward its formation slot with framerate-independent exponential smoothing (fraction
    * of the remaining gap closed this frame depends on elapsed time, not frame count).
    *
-   * Two distinct delays, deliberately not conflated: the "human, not a drone" pause when the
-   * squad first sets off lives entirely in the one-time triggerStartMoveDelay() reaction pause —
-   * once a follower starts moving it catches up quickly (moveResponseRate) and keeps pace, rather
-   * than perpetually lagging. A shape/flip/size change applies a slower rate for a couple of
-   * seconds via triggerReshapeDelay() — but never to the leader: the leader's target keeps
-   * tracking live player input the whole time, so slowing it down here would let the target race
-   * ahead while slowed, then jerk forward to slam the accumulated gap shut the instant the
-   * slowdown expired. The leader always uses its normal fast rate; only followers re-form slowly.
+   * The "human, not a drone" delay is always a plain hold (holdRemaining, see
+   * triggerStartMoveDelay/triggerReshapeDelay) followed by tracking at the *same* normal rate
+   * used the rest of the time — never a temporarily slower rate. A temporary slow rate lets the
+   * gap to a still-moving target grow for as long as it's in effect, then has to snap to full
+   * speed the instant it expires to close that now-larger gap — a visible jerk. A hold's
+   * accumulated gap is bounded by its short fixed duration, and there's no rate handoff
+   * afterward to jerk on. The leader always uses its own much faster rate and is never held.
    */
   moveToward(target: { x: number; y: number }, dt: number) {
-    if (this.startMoveDelayRemaining > 0) {
-      this.startMoveDelayRemaining -= dt;
+    if (this.holdRemaining > 0) {
+      this.holdRemaining -= dt;
       return;
     }
-    if (this.reshapeSlowdownRemaining > 0) this.reshapeSlowdownRemaining -= dt;
 
-    const rate = this.isLeader
-      ? LEADER_MOVE_RESPONSE_RATE
-      : this.reshapeSlowdownRemaining > 0
-        ? RESHAPE_RESPONSE_RATE
-        : this.stats.moveResponseRate;
+    const rate = this.isLeader ? LEADER_MOVE_RESPONSE_RATE : this.stats.moveResponseRate;
     const factor = 1 - Math.exp(-rate * dt);
     this.sprite.x += (target.x - this.sprite.x) * factor;
     this.sprite.y += (target.y - this.sprite.y) * factor;
