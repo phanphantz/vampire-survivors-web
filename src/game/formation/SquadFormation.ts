@@ -3,20 +3,22 @@ import type { FormationShape, Vec2 } from './Formation';
 
 const DEFAULT_TURN_RATE_RAD_PER_SEC = Math.PI * 2; // a full reversal takes ~0.5s, not instant
 
-// Column/wedge offsets encode "distance behind the front" as |offset.x| (0, 1, 2, ...). Each
-// unit of that distance is read back this many seconds into the leader's trail, so a rotation
-// reaches the front almost immediately and only reaches the back after a delay — a whip crack,
-// not a rigid rotation. Circle has no front-to-back structure, so it's exempt (see below).
-const PER_UNIT_TRAIL_DELAY_SEC = 0.18;
-const TRAIL_RETENTION_SEC = 1.5;
+// Column/wedge offsets encode "distance behind the front" as |offset.x| formation-spacing units.
+// Rather than rotate every slot rigidly around the same instantaneous angle, each slot is placed
+// by walking `|offset.x| * spacing` back along the leader's actual recent path — the front reacts
+// immediately, the back only catches up once its point in the path reaches there, producing a
+// whip-like sequential swing on rotation. Indexed by distance (not time) so a slot's position
+// stays put once the leader stops, instead of collapsing back onto it. Circle has no
+// front-to-back structure, so it's exempt (see below) and just rotates rigidly.
+const TRAIL_RETENTION_MULTIPLIER = 3; // keep enough path behind for the largest offset, with headroom
 
 interface TrailSample {
-  t: number;
+  dist: number; // cumulative distance the leader had traveled when this sample was recorded
   pos: Vec2;
   angle: number;
 }
 
-/** Framework-agnostic formation state: shape, squad size, spacing, current facing, and the leader's trail. */
+/** Framework-agnostic formation state: shape, squad size, spacing, current facing, and the leader's path trail. */
 export class SquadFormation {
   shape: FormationShape;
   spacing: number;
@@ -24,7 +26,7 @@ export class SquadFormation {
   private facingAngle = 0; // radians; 0 = facing +x — smoothed, catches up to targetFacingAngle
   private targetFacingAngle = 0; // last commanded heading; sticks after the key is released
   private turnRateRadPerSec: number;
-  private elapsed = 0;
+  private traveledDistance = 0;
   private trail: TrailSample[] = [];
 
   constructor(count = 1, shape: FormationShape = 'wedge', spacing = 42, turnRateRadPerSec = DEFAULT_TURN_RATE_RAD_PER_SEC) {
@@ -48,8 +50,8 @@ export class SquadFormation {
   }
 
   /**
-   * Advances facing and records the leader's trail. Call once per frame before reading slot
-   * positions/aim directions.
+   * Advances facing and records the leader's path trail. Call once per frame before reading
+   * slot positions/aim directions.
    *
    * A key press commits a heading: while held, the target tracks the input directly; once
    * released, the target sticks at the last direction and facing keeps turning toward it every
@@ -61,9 +63,14 @@ export class SquadFormation {
     }
     this.facingAngle = rotateTowardAngle(this.facingAngle, this.targetFacingAngle, this.turnRateRadPerSec * dt);
 
-    this.elapsed += dt;
-    this.trail.push({ t: this.elapsed, pos: { x: leaderPos.x, y: leaderPos.y }, angle: this.facingAngle });
-    while (this.trail.length > 2 && this.elapsed - this.trail[0].t > TRAIL_RETENTION_SEC) {
+    const last = this.trail[this.trail.length - 1];
+    if (last) {
+      this.traveledDistance += Math.hypot(leaderPos.x - last.pos.x, leaderPos.y - last.pos.y);
+    }
+    this.trail.push({ dist: this.traveledDistance, pos: { x: leaderPos.x, y: leaderPos.y }, angle: this.facingAngle });
+
+    const maxBehind = this.spacing * MAX_SQUAD_SIZE * TRAIL_RETENTION_MULTIPLIER;
+    while (this.trail.length > 2 && this.traveledDistance - this.trail[0].dist > maxBehind) {
       this.trail.shift();
     }
   }
@@ -77,7 +84,7 @@ export class SquadFormation {
       });
     }
     return offsets.map((offset) => {
-      const pose = this.sampleTrail(Math.abs(offset.x) * PER_UNIT_TRAIL_DELAY_SEC);
+      const pose = this.sampleBehind(Math.abs(offset.x) * this.spacing);
       const r = rotateAndScale({ x: 0, y: offset.y }, pose.angle, this.spacing);
       return { x: pose.pos.x + r.x, y: pose.pos.y + r.y };
     });
@@ -91,30 +98,47 @@ export class SquadFormation {
     }
     const offsets = getFormationOffsets(this.shape, this.count);
     return dirs.map((dir, i) => {
-      const pose = this.sampleTrail(Math.abs(offsets[i].x) * PER_UNIT_TRAIL_DELAY_SEC);
+      const pose = this.sampleBehind(Math.abs(offsets[i].x) * this.spacing);
       return rotateAndScale(dir, pose.angle, 1);
     });
   }
 
-  /** Interpolated {pos, angle} from `delaySec` seconds ago in the recorded trail. */
-  private sampleTrail(delaySec: number): { pos: Vec2; angle: number } {
-    const targetT = this.elapsed - delaySec;
+  /**
+   * {pos, angle} exactly `distanceBehind` px back along the leader's traveled path. If the
+   * leader hasn't traveled far enough yet (e.g. just spawned), extrapolates straight back from
+   * the oldest known pose instead of clamping — so the formation still has correct static
+   * spacing even before the leader has taken a single step.
+   */
+  private sampleBehind(distanceBehind: number): { pos: Vec2; angle: number } {
+    const targetDist = this.traveledDistance - distanceBehind;
     const oldest = this.trail[0];
-    if (!oldest || targetT <= oldest.t) return oldest ?? { pos: { x: 0, y: 0 }, angle: this.facingAngle };
+    if (!oldest) return { pos: { x: 0, y: 0 }, angle: this.facingAngle };
+
+    if (targetDist <= oldest.dist) {
+      const shortfall = oldest.dist - targetDist;
+      return {
+        pos: {
+          x: oldest.pos.x - Math.cos(oldest.angle) * shortfall,
+          y: oldest.pos.y - Math.sin(oldest.angle) * shortfall,
+        },
+        angle: oldest.angle,
+      };
+    }
 
     for (let i = this.trail.length - 1; i > 0; i--) {
       const a = this.trail[i - 1];
       const b = this.trail[i];
-      if (targetT >= a.t && targetT <= b.t) {
-        const span = b.t - a.t;
-        const frac = span > 1e-6 ? (targetT - a.t) / span : 0;
+      if (targetDist >= a.dist && targetDist <= b.dist) {
+        const span = b.dist - a.dist;
+        const frac = span > 1e-6 ? (targetDist - a.dist) / span : 0;
         return {
           pos: { x: a.pos.x + (b.pos.x - a.pos.x) * frac, y: a.pos.y + (b.pos.y - a.pos.y) * frac },
           angle: a.angle + angleDiff(b.angle, a.angle) * frac,
         };
       }
     }
-    return this.trail[this.trail.length - 1];
+    const latest = this.trail[this.trail.length - 1];
+    return { pos: latest.pos, angle: latest.angle };
   }
 }
 
