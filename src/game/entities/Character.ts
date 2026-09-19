@@ -22,16 +22,18 @@ export const DEFAULT_STATS: CharacterStats = {
 };
 
 const AIM_INDICATOR_LENGTH = 112;
+const AIM_INDICATOR_BAND_COUNT = 8; // concentric pie slices whose overlap simulates a center-to-edge fade
+const AIM_INDICATOR_BAND_ALPHA = 0.05; // per-layer alpha; compounds toward the center, thins out toward the tip
 const HEALTH_BAR_WIDTH = 80;
 const HEALTH_BAR_HEIGHT = 9;
 const SPRITE_SCALE = CHARACTER_DISPLAY_HEIGHT / CHARACTER_FRAME_HEIGHT;
-const MOVEMENT_ARROW_OFFSET = 52; // px above the sprite's head, clear of the health bar
-const MOVEMENT_ARROW_LENGTH = 28;
-const MOVEMENT_ARROW_HEAD_SIZE = 12;
-const MOVEMENT_ARROW_HEAD_SPREAD_RAD = Math.PI / 6;
-const MOVEMENT_ARROW_COLOR = 0xfacc15;
-const MOVEMENT_TURN_RATE_RAD_PER_SEC = Math.PI * 3;
+const MOVEMENT_TURN_RATE_RAD_PER_SEC = Math.PI * 3; // how fast facingAngle catches up to actual movement
 const MIN_MOVE_DIST_FOR_TURN = 0.5; // px; ignore jitter when basically at the target already
+const LEADER_ARROW_TIP_DISTANCE = AIM_INDICATOR_LENGTH + 6; // pokes past the attack-cone indicator so it reads in front of it
+const LEADER_ARROW_ARM_LENGTH = 22;
+const LEADER_ARROW_SPREAD_RAD = Math.PI / 5; // how open the ">" chevron is
+const LEADER_ARROW_COLOR = 0x22d3ee;
+const LEADER_ARROW_OUTLINE_COLOR = 0x0f172a;
 
 export class Character {
   sprite: Phaser.Physics.Arcade.Sprite;
@@ -45,7 +47,7 @@ export class Character {
   private facingAngle = 0; // last direction moveToward() actually turned toward; holds while stationary
   private aimIndicator: Phaser.GameObjects.Graphics;
   private healthBar: Phaser.GameObjects.Graphics;
-  private movementArrow: Phaser.GameObjects.Graphics | null = null;
+  private leaderArrow: Phaser.GameObjects.Graphics | null = null;
   private lastFiredAt = -Infinity;
 
   constructor(
@@ -62,15 +64,15 @@ export class Character {
     this.sprite.setScale(SPRITE_SCALE);
     this.sprite.setTint(tint);
     this.playDirectionForAim();
-    this.aimIndicator = scene.add.graphics().setDepth(5);
+    this.aimIndicator = scene.add.graphics().setDepth(-1); // behind the sprite, not in front of it
     this.healthBar = scene.add.graphics().setDepth(6);
-    if (this.isLeader) this.movementArrow = scene.add.graphics().setDepth(7);
+    if (this.isLeader) this.leaderArrow = scene.add.graphics().setDepth(7);
   }
 
   /**
    * Eases toward its formation slot. The sprite's own facing is driven entirely by aimDirection
    * (see setAimDirection), not movement — but facingAngle is still tracked here purely for the
-   * leader's movement-direction arrow (see drawMovementArrow).
+   * leader's movement-direction arrow (see drawLeaderArrow).
    */
   moveToward(target: { x: number; y: number }, dt: number) {
     const dx = (target.x - this.sprite.x) * this.stats.moveSmoothing;
@@ -118,14 +120,19 @@ export class Character {
     const halfCone = Phaser.Math.DegToRad(this.stats.attackConeDeg) / 2;
 
     this.aimIndicator.clear();
-    this.aimIndicator.fillStyle(0xffffff, 0.1);
-    this.aimIndicator.lineStyle(1.5, 0xffffff, 0.4);
-    this.aimIndicator.beginPath();
-    this.aimIndicator.moveTo(x, y);
-    this.aimIndicator.arc(x, y, AIM_INDICATOR_LENGTH, baseAngle - halfCone, baseAngle + halfCone, false);
-    this.aimIndicator.closePath();
-    this.aimIndicator.fillPath();
-    this.aimIndicator.strokePath();
+
+    // Drawn outer-radius-first, each successive (smaller) slice overlaid on top: their alphas
+    // compound near the center and thin out toward the edge, faking a radial fade without a
+    // gradient fill API.
+    for (let i = AIM_INDICATOR_BAND_COUNT; i >= 1; i--) {
+      const r = (AIM_INDICATOR_LENGTH * i) / AIM_INDICATOR_BAND_COUNT;
+      this.aimIndicator.fillStyle(0xffffff, AIM_INDICATOR_BAND_ALPHA);
+      this.aimIndicator.beginPath();
+      this.aimIndicator.moveTo(x, y);
+      this.aimIndicator.arc(x, y, r, baseAngle - halfCone, baseAngle + halfCone, false);
+      this.aimIndicator.closePath();
+      this.aimIndicator.fillPath();
+    }
 
     // Graphics.arc() after beginPath() doesn't reliably stroke the two radial edges (only the
     // curved rim), so the cone's start/end boundaries are drawn explicitly as solid lines.
@@ -136,11 +143,6 @@ export class Character {
     const endY = y + Math.sin(baseAngle + halfCone) * AIM_INDICATOR_LENGTH;
     this.aimIndicator.lineBetween(x, y, startX, startY);
     this.aimIndicator.lineBetween(x, y, endX, endY);
-
-    this.aimIndicator.lineStyle(2, 0xffffff, 0.6);
-    const tipX = x + this.aimDirection.x * AIM_INDICATOR_LENGTH;
-    const tipY = y + this.aimDirection.y * AIM_INDICATOR_LENGTH;
-    this.aimIndicator.lineBetween(x, y, tipX, tipY);
 
     const frac = Phaser.Math.Clamp(this.hp / this.maxHp, 0, 1);
     const barX = x - HEALTH_BAR_WIDTH / 2;
@@ -154,44 +156,42 @@ export class Character {
     this.healthBar.fillStyle(barColor, 1);
     this.healthBar.fillRect(barX, barY, HEALTH_BAR_WIDTH * frac, HEALTH_BAR_HEIGHT);
 
-    if (this.movementArrow) this.drawMovementArrow(x, barY);
+    if (this.leaderArrow) this.drawLeaderArrow(x, y, this.facingAngle);
   }
 
   /**
-   * Leader-only chevron, floating above the health bar, pointing along facingAngle — the
-   * direction moveToward() last actually turned this character to face, which (unlike
-   * aimDirection) keeps pointing the way the squad was last walked even after it stops.
+   * Leader-only ">" chevron sitting just past the tip of the attack-cone indicator, tracking
+   * facingAngle (the direction moveToward() last actually turned this character to face) rather
+   * than the attack angle — attack direction can be inverted by the shooting-direction flip (X),
+   * so this marks the way the squad is actually walking, not where it's aiming.
    */
-  private drawMovementArrow(x: number, healthBarY: number) {
-    const arrow = this.movementArrow!;
+  private drawLeaderArrow(x: number, y: number, angle: number) {
+    const arrow = this.leaderArrow!;
     arrow.clear();
 
-    const originY = healthBarY - MOVEMENT_ARROW_OFFSET;
-    const angle = this.facingAngle;
-    const tipX = x + Math.cos(angle) * MOVEMENT_ARROW_LENGTH;
-    const tipY = originY + Math.sin(angle) * MOVEMENT_ARROW_LENGTH;
+    const tipX = x + Math.cos(angle) * LEADER_ARROW_TIP_DISTANCE;
+    const tipY = y + Math.sin(angle) * LEADER_ARROW_TIP_DISTANCE;
+    const backAngleLeft = angle - Math.PI + LEADER_ARROW_SPREAD_RAD;
+    const backAngleRight = angle + Math.PI - LEADER_ARROW_SPREAD_RAD;
+    const leftX = tipX + Math.cos(backAngleLeft) * LEADER_ARROW_ARM_LENGTH;
+    const leftY = tipY + Math.sin(backAngleLeft) * LEADER_ARROW_ARM_LENGTH;
+    const rightX = tipX + Math.cos(backAngleRight) * LEADER_ARROW_ARM_LENGTH;
+    const rightY = tipY + Math.sin(backAngleRight) * LEADER_ARROW_ARM_LENGTH;
 
-    arrow.lineStyle(2, MOVEMENT_ARROW_COLOR, 0.9);
-    arrow.lineBetween(x, originY, tipX, tipY);
+    // Dark outline first so the bright chevron still pops against the light attack-cone indicator and the ground tile.
+    arrow.lineStyle(4, LEADER_ARROW_OUTLINE_COLOR, 0.9);
+    arrow.lineBetween(tipX, tipY, leftX, leftY);
+    arrow.lineBetween(tipX, tipY, rightX, rightY);
 
-    const leftX = tipX - Math.cos(angle - MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
-    const leftY = tipY - Math.sin(angle - MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
-    const rightX = tipX - Math.cos(angle + MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
-    const rightY = tipY - Math.sin(angle + MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
-
-    arrow.fillStyle(MOVEMENT_ARROW_COLOR, 0.9);
-    arrow.beginPath();
-    arrow.moveTo(tipX, tipY);
-    arrow.lineTo(leftX, leftY);
-    arrow.lineTo(rightX, rightY);
-    arrow.closePath();
-    arrow.fillPath();
+    arrow.lineStyle(2, LEADER_ARROW_COLOR, 1);
+    arrow.lineBetween(tipX, tipY, leftX, leftY);
+    arrow.lineBetween(tipX, tipY, rightX, rightY);
   }
 
   destroy() {
     this.sprite.destroy();
     this.aimIndicator.destroy();
     this.healthBar.destroy();
-    this.movementArrow?.destroy();
+    this.leaderArrow?.destroy();
   }
 }
