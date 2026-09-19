@@ -21,7 +21,20 @@ function columnOffsets(count: number): Vec2[] {
   return Array.from({ length: count }, (_, i) => ({ x: -i, y: 0 }));
 }
 
+// A lone apex point can't be split evenly, so 2- and 4-person wedges drop it in favor of a
+// horizontal front rank — 2 is just that rank; 4 adds a matching rank directly behind it —
+// keeping the formation symmetric left-to-right. Odd counts (1, 3, 5) keep the classic
+// pointed-apex wedge via WEDGE_PATTERN.
 function wedgeOffsets(count: number): Vec2[] {
+  if (count === 2) return [{ x: 0, y: -0.5 }, { x: 0, y: 0.5 }];
+  if (count === 4) {
+    return [
+      { x: 0, y: -0.5 },
+      { x: 0, y: 0.5 },
+      { x: -1, y: -0.5 },
+      { x: -1, y: 0.5 },
+    ];
+  }
   const offsets: Vec2[] = [{ x: 0, y: 0 }];
   for (let i = 1; i < count; i++) offsets.push(WEDGE_PATTERN[i - 1]);
   return offsets;
@@ -97,9 +110,17 @@ function columnLinks(count: number): FormationLink[] {
   return links;
 }
 
-// Two arms spreading back from the apex: near-left/near-right attach to the apex,
-// far-left/far-right extend their matching near arm — mirrors WEDGE_PATTERN's layout.
+// Mirrors wedgeOffsets' layout: 2/4-person wedges link the front rank horizontally (and the
+// back rank to its matching front-rank member); odd counts keep the apex-rooted arms.
 function wedgeLinks(count: number): FormationLink[] {
+  if (count === 2) return [{ from: 0, to: 1 }];
+  if (count === 4) {
+    return [
+      { from: 0, to: 1 },
+      { from: 0, to: 2 },
+      { from: 1, to: 3 },
+    ];
+  }
   const links: FormationLink[] = [];
   for (let i = 1; i < count; i++) {
     links.push(i <= 2 ? { from: 0, to: i } : { from: i - 2, to: i });

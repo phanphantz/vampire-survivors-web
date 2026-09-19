@@ -113,8 +113,11 @@ export class SquadFormation {
     const offsets = getFormationOffsets(this.shape, this.count);
     const parents = getFollowParents(this.shape, this.count);
 
+    // Usually offsets[0] is (0,0) (the head sits exactly at the leader), but 2/4-person wedges
+    // put a horizontal front rank there instead, so slot 0 itself needs the rotated offset too.
+    const r0 = rotateAndScale(offsets[0], this.facingAngle, this.spacing);
     this.slotAngles[0] = this.facingAngle;
-    this.slotPositions[0] = { x: leaderPos.x, y: leaderPos.y };
+    this.slotPositions[0] = { x: leaderPos.x + r0.x, y: leaderPos.y + r0.y };
 
     for (let i = 1; i < this.count; i++) {
       const parent = parents[i];
