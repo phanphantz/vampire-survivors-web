@@ -181,7 +181,7 @@ export class MainScene extends Phaser.Scene {
     this.formationLinks.clear();
     this.formationLinks.lineStyle(2, 0x94a3b8, 0.45);
 
-    if (this.formation.shape === 'circle') {
+    if (this.formation.shape === 'circle' && !this.formation.isFlipped()) {
       if (this.squad.length > 0) {
         // Centered on the members' actual (eased) positions rather than leaderPos, which can
         // race ahead of them while moving and leave the ring visibly off-center.
@@ -194,7 +194,7 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
-    for (const link of getFormationLinks(this.formation.shape, this.squad.length)) {
+    for (const link of getFormationLinks(this.formation.shape, this.squad.length, this.formation.isFlipped())) {
       const a = this.squad[link.from];
       const b = this.squad[link.to];
       if (!a || !b) continue;

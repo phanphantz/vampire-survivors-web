@@ -21,18 +21,18 @@ function columnOffsets(count: number): Vec2[] {
   return Array.from({ length: count }, (_, i) => ({ x: -i, y: 0 }));
 }
 
-// A lone apex point can't be split evenly, so 2- and 4-person wedges drop it in favor of a
-// horizontal front rank — 2 is just that rank; 4 adds a matching rank directly behind it —
-// keeping the formation symmetric left-to-right. Odd counts (1, 3, 5) keep the classic
-// pointed-apex wedge via WEDGE_PATTERN.
+// A lone apex point can't be split evenly, so a 2-person wedge is just a horizontal front
+// rank. A 4-person wedge keeps that front rank but bows the rear rank outward wider — like an
+// archer's bow curving away from its grip — instead of a pointed apex. Odd counts (1, 3, 5)
+// keep the classic pointed-apex wedge via WEDGE_PATTERN.
 function wedgeOffsets(count: number): Vec2[] {
   if (count === 2) return [{ x: 0, y: -0.5 }, { x: 0, y: 0.5 }];
   if (count === 4) {
     return [
       { x: 0, y: -0.5 },
       { x: 0, y: 0.5 },
-      { x: -1, y: -0.5 },
-      { x: -1, y: 0.5 },
+      { x: -1, y: -1.5 },
+      { x: -1, y: 1.5 },
     ];
   }
   const offsets: Vec2[] = [{ x: 0, y: 0 }];
@@ -48,8 +48,21 @@ function circleOffsets(count: number): Vec2[] {
   });
 }
 
+// Circle's flipped alternative: paired front-to-back ranks (the flat rectangle briefly tried
+// for the 4-person wedge), generalized to any count — any leftover odd member out sits centered
+// at the back.
+function boxOffsets(count: number): Vec2[] {
+  const offsets: Vec2[] = [];
+  const pairs = Math.floor(count / 2);
+  for (let r = 0; r < pairs; r++) {
+    offsets.push({ x: -r, y: -0.5 }, { x: -r, y: 0.5 });
+  }
+  if (count % 2 === 1) offsets.push({ x: -pairs, y: 0 });
+  return offsets;
+}
+
 /** Local-space slot offsets (unscaled, unrotated). +x = forward, +y = right. */
-export function getFormationOffsets(shape: FormationShape, count: number): Vec2[] {
+export function getFormationOffsets(shape: FormationShape, count: number, mirrored = false): Vec2[] {
   const n = Math.max(1, Math.min(MAX_SQUAD_SIZE, count));
   switch (shape) {
     case 'column':
@@ -57,7 +70,7 @@ export function getFormationOffsets(shape: FormationShape, count: number): Vec2[
     case 'wedge':
       return wedgeOffsets(n);
     case 'circle':
-      return circleOffsets(n);
+      return mirrored ? boxOffsets(n) : circleOffsets(n);
   }
 }
 
@@ -78,10 +91,10 @@ function wedgeAttackDirections(count: number, mirrored: boolean): Vec2[] {
   return Array.from({ length: count }, () => ({ x: dir, y: 0 }));
 }
 
-// Each slot fires radially outward from the ring it stands on, covering all around.
-// Radially symmetric, so flipping has no meaningful effect and is ignored.
-function circleAttackDirections(count: number): Vec2[] {
-  const offsets = circleOffsets(count);
+// Each slot fires outward from wherever it stands, covering all around. Only the direction's
+// angle is used downstream (see SquadFormation), so the offset vector doesn't need to be unit
+// length — this doubles as boxAttackDirections' aim source when flipped.
+function radialAttackDirections(offsets: Vec2[]): Vec2[] {
   return offsets.map((o) => (o.x === 0 && o.y === 0 ? { x: 1, y: 0 } : o));
 }
 
@@ -94,7 +107,7 @@ export function getAttackDirections(shape: FormationShape, count: number, mirror
     case 'wedge':
       return wedgeAttackDirections(n, mirrored);
     case 'circle':
-      return circleAttackDirections(n);
+      return radialAttackDirections(mirrored ? boxOffsets(n) : circleOffsets(n));
   }
 }
 
@@ -140,8 +153,28 @@ function circleLinks(count: number): FormationLink[] {
   return links;
 }
 
+// Mirrors boxOffsets' layout: each pair gets a horizontal rung, each pair beyond the first
+// rails back to the matching side of the pair in front of it, and a leftover odd member out
+// links back to the last pair's near side.
+function boxLinks(count: number): FormationLink[] {
+  const links: FormationLink[] = [];
+  const pairs = Math.floor(count / 2);
+  for (let r = 0; r < pairs; r++) {
+    const left = r * 2;
+    const right = r * 2 + 1;
+    links.push({ from: left, to: right });
+    if (r > 0) {
+      links.push({ from: left - 2, to: left }, { from: right - 2, to: right });
+    }
+  }
+  if (count % 2 === 1 && count > 1) {
+    links.push({ from: (pairs - 1) * 2, to: count - 1 });
+  }
+  return links;
+}
+
 /** Which slot indices should be visually connected, reflecting each formation's topology. */
-export function getFormationLinks(shape: FormationShape, count: number): FormationLink[] {
+export function getFormationLinks(shape: FormationShape, count: number, mirrored = false): FormationLink[] {
   const n = Math.max(1, Math.min(MAX_SQUAD_SIZE, count));
   switch (shape) {
     case 'column':
@@ -149,7 +182,7 @@ export function getFormationLinks(shape: FormationShape, count: number): Formati
     case 'wedge':
       return wedgeLinks(n);
     case 'circle':
-      return circleLinks(n);
+      return mirrored ? boxLinks(n) : circleLinks(n);
   }
 }
 
