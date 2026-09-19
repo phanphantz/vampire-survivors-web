@@ -1,13 +1,20 @@
 import Phaser from 'phaser';
 
-/** Generates flat-color circle textures at boot so the prototype needs no art assets. */
+/** One distinct color per squad slot, so each teammate reads as a separate character. */
+export const CHARACTER_COLORS = [0x4fd1c5, 0xf6ad55, 0xb794f4, 0x68d391, 0xf687b3];
+
+export function characterTextureKey(slotIndex: number): string {
+  return `character-${slotIndex % CHARACTER_COLORS.length}`;
+}
+
+/** Generates flat-color textures at boot so the prototype needs no art assets. */
 export class BootScene extends Phaser.Scene {
   constructor() {
     super('boot');
   }
 
   create() {
-    this.makeCircleTexture('character', 14, 0x4fd1c5);
+    CHARACTER_COLORS.forEach((color, i) => this.makeRectTexture(characterTextureKey(i), 16, 28, color));
     this.makeCircleTexture('enemy', 12, 0xf56565);
     this.makeCircleTexture('bullet', 4, 0xf6e05e);
     this.makeGridTileTexture('ground-tile', 100, 0x14161c, 0x22252e);
@@ -30,6 +37,17 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(color, 1);
     g.fillCircle(radius, radius, radius);
     g.generateTexture(key, radius * 2, radius * 2);
+    g.destroy();
+  }
+
+  /** Squad members render as a vertical rounded rectangle rather than a circle. */
+  private makeRectTexture(key: string, width: number, height: number, color: number) {
+    const g = this.add.graphics();
+    g.fillStyle(color, 1);
+    g.fillRoundedRect(0, 0, width, height, 4);
+    g.lineStyle(2, 0xffffff, 0.35);
+    g.strokeRoundedRect(1, 1, width - 2, height - 2, 3);
+    g.generateTexture(key, width, height);
     g.destroy();
   }
 }

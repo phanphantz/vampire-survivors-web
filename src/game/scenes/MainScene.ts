@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import { SquadFormation } from '../formation/SquadFormation';
-import { MAX_SQUAD_SIZE } from '../formation/Formation';
+import { MAX_SQUAD_SIZE, getFormationLinks } from '../formation/Formation';
 import type { Vec2 } from '../formation/Formation';
 import { Character } from '../entities/Character';
+import { characterTextureKey } from './BootScene';
 import { WorldPartition } from '../world/WorldPartition';
 import type { ChunkCoord } from '../world/WorldPartition';
 
@@ -30,6 +31,7 @@ export class MainScene extends Phaser.Scene {
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
   private background!: Phaser.GameObjects.TileSprite;
+  private formationLinks!: Phaser.GameObjects.Graphics;
 
   private nextSpawnAt = 0;
   private spawnIntervalMs = 1400;
@@ -73,6 +75,7 @@ export class MainScene extends Phaser.Scene {
 
     this.bullets = this.physics.add.group();
     this.enemies = this.physics.add.group();
+    this.formationLinks = this.add.graphics().setDepth(4);
 
     this.spawnCharacter();
     this.partition.update(this.leaderPos); // seed the initial active window without spawning
@@ -107,10 +110,14 @@ export class MainScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.shapeKey)) this.formation.cycleShape();
 
     const slots = this.formation.getSlotWorldPositions(this.leaderPos);
+    const aimDirs = this.formation.getSlotAimWorldDirections();
     this.squad.forEach((character, i) => {
       character.moveToward(slots[i]);
+      character.setAimDirection(aimDirs[i]);
+      character.updateVisuals();
       this.tryFire(character, time);
     });
+    this.drawFormationLinks();
 
     this.updateEnemies(dt);
     this.maybeSpawnEnemy(time);
@@ -149,17 +156,30 @@ export class MainScene extends Phaser.Scene {
   }
 
   private spawnCharacter() {
-    this.squad.push(new Character(this, this.leaderPos.x, this.leaderPos.y, 'character'));
+    const textureKey = characterTextureKey(this.squad.length);
+    this.squad.push(new Character(this, this.leaderPos.x, this.leaderPos.y, textureKey));
+  }
+
+  /** Draws the formation's topology (who stands next to whom) between current squad positions. */
+  private drawFormationLinks() {
+    this.formationLinks.clear();
+    this.formationLinks.lineStyle(2, 0x94a3b8, 0.45);
+    for (const link of getFormationLinks(this.formation.shape, this.squad.length)) {
+      const a = this.squad[link.from];
+      const b = this.squad[link.to];
+      if (!a || !b) continue;
+      this.formationLinks.lineBetween(a.sprite.x, a.sprite.y, b.sprite.x, b.sprite.y);
+    }
   }
 
   // --- combat ----------------------------------------------------------
 
+  // Each slot fires along its formation-assigned heading (see Formation.getAttackDirections)
+  // rather than homing in on the nearest enemy — the formation shape is what decides coverage.
   private tryFire(character: Character, time: number) {
     if (!character.canFire(time)) return;
-    const target = this.findNearestEnemy(character.sprite.x, character.sprite.y, character.stats.range);
-    if (!target) return;
 
-    const dir = new Phaser.Math.Vector2(target.x - character.sprite.x, target.y - character.sprite.y).normalize();
+    const dir = character.aimDirection;
     const bullet = this.bullets.get(character.sprite.x, character.sprite.y, 'bullet') as Phaser.Physics.Arcade.Sprite;
     if (!bullet) return;
     bullet.setActive(true).setVisible(true);
@@ -169,21 +189,6 @@ export class MainScene extends Phaser.Scene {
     body.setVelocity(dir.x * character.stats.bulletSpeed, dir.y * character.stats.bulletSpeed);
 
     character.markFired(time);
-  }
-
-  private findNearestEnemy(x: number, y: number, maxRange: number): Phaser.Physics.Arcade.Sprite | null {
-    let nearest: Phaser.Physics.Arcade.Sprite | null = null;
-    let nearestDist = maxRange;
-    for (const obj of this.enemies.getChildren()) {
-      const enemy = obj as Phaser.Physics.Arcade.Sprite;
-      if (!enemy.active) continue;
-      const dist = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
-      if (dist < nearestDist) {
-        nearestDist = dist;
-        nearest = enemy;
-      }
-    }
-    return nearest;
   }
 
   private onBulletHitEnemy(bullet: Phaser.Physics.Arcade.Sprite, enemy: Phaser.Physics.Arcade.Sprite) {
@@ -245,7 +250,7 @@ export class MainScene extends Phaser.Scene {
 
       this.squad.forEach((character) => {
         const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, character.sprite.x, character.sprite.y);
-        if (dist < 22) {
+        if (dist < 24) {
           character.hp -= ENEMY_CONTACT_DPS * dt;
         }
       });

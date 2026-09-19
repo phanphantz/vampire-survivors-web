@@ -48,6 +48,88 @@ export function getFormationOffsets(shape: FormationShape, count: number): Vec2[
   }
 }
 
+// Head fires forward, the rear fires backward, and anyone lined up in between (the
+// "trail") alternates flanks left/right — together the column covers all sides.
+function columnAttackDirections(count: number): Vec2[] {
+  return Array.from({ length: count }, (_, i) => {
+    if (i === 0) return { x: 1, y: 0 };
+    if (i === count - 1) return { x: -1, y: 0 };
+    const side = i % 2 === 1 ? 1 : -1;
+    return { x: 0, y: side };
+  });
+}
+
+// The whole wedge pushes forward as one spearhead.
+function wedgeAttackDirections(count: number): Vec2[] {
+  return Array.from({ length: count }, () => ({ x: 1, y: 0 }));
+}
+
+// Each slot fires radially outward from the ring it stands on, covering all around.
+function circleAttackDirections(count: number): Vec2[] {
+  const offsets = circleOffsets(count);
+  return offsets.map((o) => (o.x === 0 && o.y === 0 ? { x: 1, y: 0 } : o));
+}
+
+/** Local-space aim direction per slot (unit vectors, unrotated). +x = forward, +y = right. */
+export function getAttackDirections(shape: FormationShape, count: number): Vec2[] {
+  const n = Math.max(1, Math.min(MAX_SQUAD_SIZE, count));
+  switch (shape) {
+    case 'column':
+      return columnAttackDirections(n);
+    case 'wedge':
+      return wedgeAttackDirections(n);
+    case 'circle':
+      return circleAttackDirections(n);
+  }
+}
+
+export interface FormationLink {
+  from: number;
+  to: number;
+}
+
+// A straight chain: head-trail-...-back, matching the single-file layout.
+function columnLinks(count: number): FormationLink[] {
+  const links: FormationLink[] = [];
+  for (let i = 0; i < count - 1; i++) links.push({ from: i, to: i + 1 });
+  return links;
+}
+
+// Two arms spreading back from the apex: near-left/near-right attach to the apex,
+// far-left/far-right extend their matching near arm — mirrors WEDGE_PATTERN's layout.
+function wedgeLinks(count: number): FormationLink[] {
+  const links: FormationLink[] = [];
+  for (let i = 1; i < count; i++) {
+    links.push(i <= 2 ? { from: 0, to: i } : { from: i - 2, to: i });
+  }
+  return links;
+}
+
+// A closed ring connecting neighbors around the circle.
+function circleLinks(count: number): FormationLink[] {
+  if (count < 2) return [];
+  const links: FormationLink[] = [];
+  for (let i = 0; i < count; i++) {
+    const j = (i + 1) % count;
+    if (count === 2 && j < i) continue; // a pair only needs one edge, not two
+    links.push({ from: i, to: j });
+  }
+  return links;
+}
+
+/** Which slot indices should be visually connected, reflecting each formation's topology. */
+export function getFormationLinks(shape: FormationShape, count: number): FormationLink[] {
+  const n = Math.max(1, Math.min(MAX_SQUAD_SIZE, count));
+  switch (shape) {
+    case 'column':
+      return columnLinks(n);
+    case 'wedge':
+      return wedgeLinks(n);
+    case 'circle':
+      return circleLinks(n);
+  }
+}
+
 export function rotateAndScale(offset: Vec2, angleRad: number, spacing: number): Vec2 {
   const cos = Math.cos(angleRad);
   const sin = Math.sin(angleRad);

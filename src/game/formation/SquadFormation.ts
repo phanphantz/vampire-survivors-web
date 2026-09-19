@@ -1,4 +1,4 @@
-import { MAX_SQUAD_SIZE, getFormationOffsets, rotateAndScale } from './Formation';
+import { MAX_SQUAD_SIZE, getAttackDirections, getFormationOffsets, rotateAndScale } from './Formation';
 import type { FormationShape, Vec2 } from './Formation';
 
 /** Framework-agnostic formation state: shape, squad size, spacing, and current facing. */
@@ -38,6 +38,11 @@ export class SquadFormation {
       const r = rotateAndScale(offset, this.facingAngle, this.spacing);
       return { x: leaderPos.x + r.x, y: leaderPos.y + r.y };
     });
+  }
+
+  /** Per-slot aim direction (unit vectors) reflecting each formation's attack pattern. */
+  getSlotAimWorldDirections(): Vec2[] {
+    return getAttackDirections(this.shape, this.count).map((dir) => rotateAndScale(dir, this.facingAngle, 1));
   }
 }
 
