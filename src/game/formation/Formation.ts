@@ -91,11 +91,17 @@ function wedgeAttackDirections(count: number, mirrored: boolean): Vec2[] {
   return Array.from({ length: count }, () => ({ x: dir, y: 0 }));
 }
 
-// Each slot fires outward from wherever it stands, covering all around. Only the direction's
-// angle is used downstream (see SquadFormation), so the offset vector doesn't need to be unit
-// length — this doubles as boxAttackDirections' aim source when flipped.
-function radialAttackDirections(offsets: Vec2[]): Vec2[] {
-  return offsets.map((o) => (o.x === 0 && o.y === 0 ? { x: 1, y: 0 } : o));
+// The ring: each slot fires outward from wherever it stands, covering all around. Only the
+// direction's angle is used downstream (see SquadFormation), so the offset vector doesn't need
+// to be unit length.
+function circleAttackDirections(count: number): Vec2[] {
+  return circleOffsets(count).map((o) => (o.x === 0 && o.y === 0 ? { x: 1, y: 0 } : o));
+}
+
+// The box: unlike the ring, it has an actual front (see boxOffsets/boxLinks), so instead of
+// radiating outward from each member's own spot it just aims with the squad, like wedge.
+function boxAttackDirections(count: number): Vec2[] {
+  return Array.from({ length: count }, () => ({ x: 1, y: 0 }));
 }
 
 /** Local-space aim direction per slot (unit vectors, unrotated). +x = forward, +y = right. */
@@ -107,7 +113,7 @@ export function getAttackDirections(shape: FormationShape, count: number, mirror
     case 'wedge':
       return wedgeAttackDirections(n, mirrored);
     case 'circle':
-      return radialAttackDirections(mirrored ? boxOffsets(n) : circleOffsets(n));
+      return mirrored ? boxAttackDirections(n) : circleAttackDirections(n);
   }
 }
 
