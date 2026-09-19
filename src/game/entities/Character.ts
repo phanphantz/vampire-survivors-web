@@ -35,6 +35,8 @@ const LEADER_ARROW_COLOR = 0x22d3ee;
 const LEADER_ARROW_OUTLINE_COLOR = 0x0f172a;
 const FOLLOWER_START_MOVE_DELAY_SEC = 0.2; // human reaction-time pause before a follower reacts to the squad setting off from a standstill
 const LEADER_MOVE_RESPONSE_RATE = 20; // ~0.05s time constant — the player's own input should feel immediate, not eased like the followers
+const RESHAPE_RESPONSE_RATE = 1.2; // ~0.83s time constant while re-forming after a shape/flip/size change — deliberately much slower than normal tracking
+const RESHAPE_SLOWDOWN_DURATION_SEC = 2.5; // how long the slower rate applies (covers ~95% of the slow settle) before reverting to normal speed
 
 // Y-sort: depth tracks the sprite's foot position (its lower edge, not its center) every frame,
 // so a character standing further down the screen — visually closer to the viewer — always
@@ -65,6 +67,7 @@ export class Character {
   private leaderArrow: Phaser.GameObjects.Graphics | null = null;
   private lastFiredAt = -Infinity;
   private startMoveDelayRemaining = 0; // followers only; counts down before they react to the squad setting off
+  private reshapeSlowdownRemaining = 0; // everyone (leader included); counts down while re-forming after a shape/flip/size change
 
   constructor(
     scene: Phaser.Scene,
@@ -95,20 +98,38 @@ export class Character {
   }
 
   /**
+   * Everyone, leader included: called when the formation shape, flip, or squad size changes, so
+   * re-forming into the new layout takes a deliberate, visible duration instead of snapping into
+   * place at the normal (fast) tracking speed.
+   */
+  triggerReshapeDelay() {
+    this.reshapeSlowdownRemaining = RESHAPE_SLOWDOWN_DURATION_SEC;
+  }
+
+  /**
    * Eases toward its formation slot with framerate-independent exponential smoothing (fraction
-   * of the remaining gap closed this frame depends on elapsed time, not frame count). The
-   * "human, not a drone" delay is front-loaded entirely into the one-time reaction-time pause
-   * from triggerStartMoveDelay() when the squad first sets off — once a follower starts moving it
-   * catches up quickly (moveResponseRate) and keeps pace, rather than perpetually lagging. The
-   * leader uses an even faster rate so the player's own input always feels immediate. The
-   * sprite's own facing is driven entirely by aimDirection (see setAimDirection), not movement.
+   * of the remaining gap closed this frame depends on elapsed time, not frame count).
+   *
+   * Two distinct delays, deliberately not conflated: the "human, not a drone" pause when the
+   * squad first sets off lives entirely in the one-time triggerStartMoveDelay() reaction pause —
+   * once a follower starts moving it catches up quickly (moveResponseRate) and keeps pace, rather
+   * than perpetually lagging. A shape/flip/size change is different: it's a deliberate re-form,
+   * so triggerReshapeDelay() applies a much slower rate to *everyone* (leader included) for a
+   * few seconds, then normal speed resumes.
    */
   moveToward(target: { x: number; y: number }, dt: number) {
     if (this.startMoveDelayRemaining > 0) {
       this.startMoveDelayRemaining -= dt;
       return;
     }
-    const rate = this.isLeader ? LEADER_MOVE_RESPONSE_RATE : this.stats.moveResponseRate;
+    if (this.reshapeSlowdownRemaining > 0) this.reshapeSlowdownRemaining -= dt;
+
+    const rate =
+      this.reshapeSlowdownRemaining > 0
+        ? RESHAPE_RESPONSE_RATE
+        : this.isLeader
+          ? LEADER_MOVE_RESPONSE_RATE
+          : this.stats.moveResponseRate;
     const factor = 1 - Math.exp(-rate * dt);
     this.sprite.x += (target.x - this.sprite.x) * factor;
     this.sprite.y += (target.y - this.sprite.y) * factor;
