@@ -44,7 +44,8 @@ export class Character {
   readonly isLeader: boolean;
 
   private currentDirectionIndex = -1;
-  private facingAngle = 0; // last direction moveToward() actually turned toward; holds while stationary
+  private facingAngle = 0; // smoothed; catches up to targetFacingAngle every frame, moving or not
+  private targetFacingAngle = 0; // last direction actually moved toward; sticks once movement stops
   private aimIndicator: Phaser.GameObjects.Graphics;
   private healthBar: Phaser.GameObjects.Graphics;
   private leaderArrow: Phaser.GameObjects.Graphics | null = null;
@@ -73,6 +74,11 @@ export class Character {
    * Eases toward its formation slot. The sprite's own facing is driven entirely by aimDirection
    * (see setAimDirection), not movement — but facingAngle is still tracked here purely for the
    * leader's movement-direction arrow (see drawLeaderArrow).
+   *
+   * Mirrors SquadFormation's sticky-heading pattern: while actually moving, the target angle
+   * tracks the live movement direction; once movement stops (key released), the target sticks at
+   * the last direction and facingAngle keeps turning toward it every frame regardless, so a brief
+   * tap still eventually finishes the turn instead of freezing mid-way.
    */
   moveToward(target: { x: number; y: number }, dt: number) {
     const dx = (target.x - this.sprite.x) * this.stats.moveSmoothing;
@@ -80,9 +86,11 @@ export class Character {
     this.sprite.x += dx;
     this.sprite.y += dy;
 
-    if (this.isLeader && Math.hypot(dx, dy) > MIN_MOVE_DIST_FOR_TURN) {
-      const targetAngle = Math.atan2(dy, dx);
-      this.facingAngle = rotateTowardAngle(this.facingAngle, targetAngle, MOVEMENT_TURN_RATE_RAD_PER_SEC * dt);
+    if (this.isLeader) {
+      if (Math.hypot(dx, dy) > MIN_MOVE_DIST_FOR_TURN) {
+        this.targetFacingAngle = Math.atan2(dy, dx);
+      }
+      this.facingAngle = rotateTowardAngle(this.facingAngle, this.targetFacingAngle, MOVEMENT_TURN_RATE_RAD_PER_SEC * dt);
     }
   }
 
