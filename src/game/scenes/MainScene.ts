@@ -223,7 +223,7 @@ export class MainScene extends Phaser.Scene {
     this.triggerReshapeDelay();
   }
 
-  /** Formation shape/flip/size just changed — everyone (leader included) gets a deliberately slow re-form instead of snapping to the new layout. */
+  /** Formation shape/flip/size just changed — followers get a deliberately slow re-form instead of snapping to the new layout (leader stays instantly responsive). */
   private triggerReshapeDelay() {
     this.squad.forEach((character) => character.triggerReshapeDelay());
   }
