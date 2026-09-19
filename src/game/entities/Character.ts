@@ -34,6 +34,19 @@ const LEADER_ARROW_SPREAD_RAD = Math.PI / 5; // how open the ">" chevron is
 const LEADER_ARROW_COLOR = 0x22d3ee;
 const LEADER_ARROW_OUTLINE_COLOR = 0x0f172a;
 
+// Y-sort: depth tracks the sprite's foot position (its lower edge, not its center) every frame,
+// so a character standing further down the screen — visually closer to the viewer — always
+// renders in front of one standing further up, and the ordering updates live as either moves.
+// Offset well clear of zero so it stays positive (and thus in front of the background/formation
+// links) even when world Y goes negative, which it can in this unbounded world. Overlays (cone,
+// health bar, leader arrow) are pinned to the same base so the whole per-character stack sorts
+// as one unit instead of interleaving with a neighbor's.
+export const Y_SORT_DEPTH_OFFSET = 100_000;
+
+function footDepth(sprite: Phaser.GameObjects.Sprite): number {
+  return Y_SORT_DEPTH_OFFSET + sprite.y + sprite.displayHeight / 2;
+}
+
 export class Character {
   sprite: Phaser.Physics.Arcade.Sprite;
   stats: CharacterStats;
@@ -120,6 +133,12 @@ export class Character {
   /** Redraws the aim-cone indicator and health gauge at the sprite's current position. */
   updateVisuals() {
     const { x, y } = this.sprite;
+
+    const baseDepth = footDepth(this.sprite);
+    this.aimIndicator.setDepth(baseDepth - 2);
+    this.sprite.setDepth(baseDepth);
+    this.healthBar.setDepth(baseDepth + 1);
+    this.leaderArrow?.setDepth(baseDepth + 2);
 
     const baseAngle = Math.atan2(this.aimDirection.y, this.aimDirection.x);
     const halfCone = Phaser.Math.DegToRad(this.stats.attackConeDeg) / 2;

@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { SquadFormation } from '../formation/SquadFormation';
 import { MAX_SQUAD_SIZE, angleDiff, getFormationLinks } from '../formation/Formation';
 import type { Vec2 } from '../formation/Formation';
-import { Character, DEFAULT_STATS } from '../entities/Character';
+import { Character, DEFAULT_STATS, Y_SORT_DEPTH_OFFSET } from '../entities/Character';
 import { Stamina } from '../entities/Stamina';
 import { CHARACTER_COLORS } from './BootScene';
 import { WorldPartition } from '../world/WorldPartition';
@@ -17,6 +17,12 @@ const SPAWN_MARGIN = 60; // px outside the camera view where enemies pop in
 const CHUNK_SIZE = 500;
 const ACTIVE_RADIUS_CHUNKS = 4; // ~4000px active window kept simulated around the squad
 const CHUNK_SPAWN_CHANCE = 0.4;
+
+// Characters/enemies are Y-sorted (see Y_SORT_DEPTH_OFFSET); bullets and screen-space UI sit in
+// depth bands clearly above that range so they're never accidentally hidden behind a body.
+const BULLET_DEPTH = Y_SORT_DEPTH_OFFSET * 2;
+const UI_DEPTH = Y_SORT_DEPTH_OFFSET * 3;
+const PAUSE_DEPTH = Y_SORT_DEPTH_OFFSET * 4;
 
 export class MainScene extends Phaser.Scene {
   private formation = new SquadFormation(1, 'wedge');
@@ -89,7 +95,7 @@ export class MainScene extends Phaser.Scene {
     this.bullets = this.physics.add.group();
     this.enemies = this.physics.add.group();
     this.formationLinks = this.add.graphics().setDepth(4);
-    this.staminaBar = this.add.graphics().setScrollFactor(0).setDepth(100);
+    this.staminaBar = this.add.graphics().setScrollFactor(0).setDepth(UI_DEPTH);
 
     this.spawnCharacter();
     this.partition.update(this.leaderPos); // seed the initial active window without spawning
@@ -103,13 +109,13 @@ export class MainScene extends Phaser.Scene {
       fontSize: '14px',
       color: '#e5e7eb',
     });
-    this.hud.setScrollFactor(0).setDepth(100);
+    this.hud.setScrollFactor(0).setDepth(UI_DEPTH);
 
     this.pauseOverlay = this.add
       .rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.6)
       .setOrigin(0, 0)
       .setScrollFactor(0)
-      .setDepth(200)
+      .setDepth(PAUSE_DEPTH)
       .setVisible(false);
     this.pauseText = this.add
       .text(this.scale.width / 2, this.scale.height / 2, 'PAUSED\nPress Esc to resume', {
@@ -120,7 +126,7 @@ export class MainScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setScrollFactor(0)
-      .setDepth(201)
+      .setDepth(PAUSE_DEPTH + 1)
       .setVisible(false);
     this.scale.on(Phaser.Scale.Events.RESIZE, (size: Phaser.Structs.Size) => {
       this.pauseOverlay.setSize(size.width, size.height);
@@ -249,7 +255,7 @@ export class MainScene extends Phaser.Scene {
     const dir = new Phaser.Math.Vector2(target.x - character.sprite.x, target.y - character.sprite.y).normalize();
     const bullet = this.bullets.get(character.sprite.x, character.sprite.y, 'bullet') as Phaser.Physics.Arcade.Sprite;
     if (!bullet) return;
-    bullet.setActive(true).setVisible(true);
+    bullet.setActive(true).setVisible(true).setDepth(BULLET_DEPTH);
     const body = bullet.body as Phaser.Physics.Arcade.Body;
     body.enable = true;
     bullet.setData('damage', character.stats.damage);
@@ -334,6 +340,7 @@ export class MainScene extends Phaser.Scene {
       const dir = new Phaser.Math.Vector2(this.leaderPos.x - enemy.x, this.leaderPos.y - enemy.y).normalize();
       enemy.x += dir.x * ENEMY_BASE_SPEED * dt;
       enemy.y += dir.y * ENEMY_BASE_SPEED * dt;
+      enemy.setDepth(Y_SORT_DEPTH_OFFSET + enemy.y); // same Y-sort space as characters
 
       this.squad.forEach((character) => {
         const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, character.sprite.x, character.sprite.y);
@@ -395,7 +402,8 @@ export class MainScene extends Phaser.Scene {
         align: 'center',
       })
       .setOrigin(0.5)
-      .setScrollFactor(0);
+      .setScrollFactor(0)
+      .setDepth(PAUSE_DEPTH + 2);
   }
 
   private updateHud() {
