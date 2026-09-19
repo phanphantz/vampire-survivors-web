@@ -48,36 +48,38 @@ export function getFormationOffsets(shape: FormationShape, count: number): Vec2[
   }
 }
 
-// Head fires forward, the rear fires backward, and anyone lined up in between (the
-// "trail") alternates flanks left/right — together the column covers all sides.
-function columnAttackDirections(count: number): Vec2[] {
+// Head fires forward, the rear fires backward — flipping never touches these two, only which
+// flank each trailing "middle" member watches (mirrored left<->right when `mirrored` is set).
+function columnAttackDirections(count: number, mirrored: boolean): Vec2[] {
   return Array.from({ length: count }, (_, i) => {
     if (i === 0) return { x: 1, y: 0 };
     if (i === count - 1) return { x: -1, y: 0 };
     const side = i % 2 === 1 ? 1 : -1;
-    return { x: 0, y: side };
+    return { x: 0, y: mirrored ? -side : side };
   });
 }
 
-// The whole wedge pushes forward as one spearhead.
-function wedgeAttackDirections(count: number): Vec2[] {
-  return Array.from({ length: count }, () => ({ x: 1, y: 0 }));
+// The whole wedge pushes forward as one spearhead — flipped, it pushes backward instead.
+function wedgeAttackDirections(count: number, mirrored: boolean): Vec2[] {
+  const dir = mirrored ? -1 : 1;
+  return Array.from({ length: count }, () => ({ x: dir, y: 0 }));
 }
 
 // Each slot fires radially outward from the ring it stands on, covering all around.
+// Radially symmetric, so flipping has no meaningful effect and is ignored.
 function circleAttackDirections(count: number): Vec2[] {
   const offsets = circleOffsets(count);
   return offsets.map((o) => (o.x === 0 && o.y === 0 ? { x: 1, y: 0 } : o));
 }
 
 /** Local-space aim direction per slot (unit vectors, unrotated). +x = forward, +y = right. */
-export function getAttackDirections(shape: FormationShape, count: number): Vec2[] {
+export function getAttackDirections(shape: FormationShape, count: number, mirrored = false): Vec2[] {
   const n = Math.max(1, Math.min(MAX_SQUAD_SIZE, count));
   switch (shape) {
     case 'column':
-      return columnAttackDirections(n);
+      return columnAttackDirections(n, mirrored);
     case 'wedge':
-      return wedgeAttackDirections(n);
+      return wedgeAttackDirections(n, mirrored);
     case 'circle':
       return circleAttackDirections(n);
   }

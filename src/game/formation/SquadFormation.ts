@@ -56,7 +56,11 @@ export class SquadFormation {
     this.shape = order[(order.indexOf(this.shape) + 1) % order.length];
   }
 
-  /** Flips wedge/column shooting front-to-back (wedge fires backward, column's head/back swap). Positions are unaffected. */
+  /**
+   * Flips shooting direction: wedge fires backward instead of forward; column mirrors which
+   * flank each trailing "middle" member watches, leaving the head (front) and back untouched.
+   * Positions are unaffected.
+   */
   toggleFlip() {
     this.flipped = !this.flipped;
   }
@@ -97,8 +101,7 @@ export class SquadFormation {
 
   /** Per-slot aim direction (unit vectors) reflecting each formation's attack pattern. */
   getSlotAimWorldDirections(): Vec2[] {
-    const shouldFlip = this.flipped && this.shape !== 'circle';
-    const dirs = getAttackDirections(this.shape, this.count).map((d) => (shouldFlip ? { x: -d.x, y: d.y } : d));
+    const dirs = getAttackDirections(this.shape, this.count, this.flipped);
     if (this.shape === 'circle') {
       return dirs.map((dir) => rotateAndScale(dir, this.facingAngle, 1));
     }
