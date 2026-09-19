@@ -8,7 +8,7 @@ export interface CharacterStats {
   damage: number;
   range: number;
   bulletSpeed: number;
-  moveResponseRate: number; // per-second exponential catch-up rate toward its formation slot (1/seconds); lower = slower, more visible human delay when the formation reshapes, rather than snapping into place
+  moveResponseRate: number; // per-second exponential catch-up rate toward its formation slot; kept fast so followers close the gap quickly once they start reacting — the human "not a drone" delay lives entirely in the one-time start-move reaction pause (FOLLOWER_START_MOVE_DELAY_SEC), not in an ongoing lag
   attackConeDeg: number; // width of the firing arc around aimDirection each shot picks within
 }
 
@@ -17,7 +17,7 @@ export const DEFAULT_STATS: CharacterStats = {
   damage: 10,
   range: 240,
   bulletSpeed: 460,
-  moveResponseRate: 1.5, // time constant ~0.67s; ~95% of the way there after ~2s
+  moveResponseRate: 8, // time constant ~0.125s; ~95% of the way there in under half a second
   attackConeDeg: 90,
 };
 
@@ -95,13 +95,13 @@ export class Character {
   }
 
   /**
-   * Eases toward its formation slot with framerate-independent exponential smoothing — the
-   * fraction of the remaining gap closed this frame depends on actual elapsed time (dt), not on
-   * frame count, so the catch-up speed (and thus how "delayed"/human a reshape looks) stays
-   * consistent regardless of frame rate. The leader uses a much faster rate than followers so the
-   * player's own input always feels immediate — only followers get the slow, human catch-up (and
-   * the reaction-time pause from triggerStartMoveDelay). The sprite's own facing is driven
-   * entirely by aimDirection (see setAimDirection), not movement.
+   * Eases toward its formation slot with framerate-independent exponential smoothing (fraction
+   * of the remaining gap closed this frame depends on elapsed time, not frame count). The
+   * "human, not a drone" delay is front-loaded entirely into the one-time reaction-time pause
+   * from triggerStartMoveDelay() when the squad first sets off — once a follower starts moving it
+   * catches up quickly (moveResponseRate) and keeps pace, rather than perpetually lagging. The
+   * leader uses an even faster rate so the player's own input always feels immediate. The
+   * sprite's own facing is driven entirely by aimDirection (see setAimDirection), not movement.
    */
   moveToward(target: { x: number; y: number }, dt: number) {
     if (this.startMoveDelayRemaining > 0) {
