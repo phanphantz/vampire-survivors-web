@@ -146,14 +146,8 @@ export class MainScene extends Phaser.Scene {
     // Squad size / shape changes must land before formation.update() runs, so its per-slot
     // arrays are already sized/shaped correctly when read later this same frame.
     this.handleSquadSizeInput();
-    if (Phaser.Input.Keyboard.JustDown(this.shapeKey)) {
-      this.formation.cycleShape();
-      this.triggerReshapeDelay();
-    }
-    if (Phaser.Input.Keyboard.JustDown(this.flipKey)) {
-      this.formation.toggleFlip();
-      this.triggerReshapeDelay();
-    }
+    if (Phaser.Input.Keyboard.JustDown(this.shapeKey)) this.formation.cycleShape();
+    if (Phaser.Input.Keyboard.JustDown(this.flipKey)) this.formation.toggleFlip();
 
     const moveDir = this.readMoveInput();
     const dt = delta / 1000;
@@ -220,12 +214,6 @@ export class MainScene extends Phaser.Scene {
     this.formation.setCount(clamped);
     while (this.squad.length < clamped) this.spawnCharacter();
     while (this.squad.length > clamped) this.squad.pop()?.destroy();
-    this.triggerReshapeDelay();
-  }
-
-  /** Formation shape/flip/size just changed — followers get a deliberately slow re-form instead of snapping to the new layout (leader stays instantly responsive). */
-  private triggerReshapeDelay() {
-    this.squad.forEach((character) => character.triggerReshapeDelay());
   }
 
   private spawnCharacter() {
