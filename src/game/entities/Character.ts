@@ -8,7 +8,7 @@ export interface CharacterStats {
   damage: number;
   range: number;
   bulletSpeed: number;
-  moveSmoothing: number; // fraction of the gap to the target slot closed per frame; lower = a more visible, human catch-up lag when the formation reshapes, rather than snapping into place instantly
+  moveResponseRate: number; // per-second exponential catch-up rate toward its formation slot (1/seconds); lower = slower, more visible human delay when the formation reshapes, rather than snapping into place
   attackConeDeg: number; // width of the firing arc around aimDirection each shot picks within
 }
 
@@ -17,7 +17,7 @@ export const DEFAULT_STATS: CharacterStats = {
   damage: 10,
   range: 240,
   bulletSpeed: 460,
-  moveSmoothing: 0.08,
+  moveResponseRate: 1.5, // time constant ~0.67s; ~95% of the way there after ~2s
   attackConeDeg: 90,
 };
 
@@ -82,10 +82,17 @@ export class Character {
     if (this.isLeader) this.leaderArrow = scene.add.graphics().setDepth(7);
   }
 
-  /** Eases toward its formation slot. The sprite's own facing is driven entirely by aimDirection (see setAimDirection), not movement. */
-  moveToward(target: { x: number; y: number }) {
-    this.sprite.x += (target.x - this.sprite.x) * this.stats.moveSmoothing;
-    this.sprite.y += (target.y - this.sprite.y) * this.stats.moveSmoothing;
+  /**
+   * Eases toward its formation slot with framerate-independent exponential smoothing — the
+   * fraction of the remaining gap closed this frame depends on actual elapsed time (dt), not on
+   * frame count, so the catch-up speed (and thus how "delayed"/human a reshape looks) stays
+   * consistent regardless of frame rate. The sprite's own facing is driven entirely by
+   * aimDirection (see setAimDirection), not movement.
+   */
+  moveToward(target: { x: number; y: number }, dt: number) {
+    const factor = 1 - Math.exp(-this.stats.moveResponseRate * dt);
+    this.sprite.x += (target.x - this.sprite.x) * factor;
+    this.sprite.y += (target.y - this.sprite.y) * factor;
   }
 
   /**

@@ -164,7 +164,7 @@ export class MainScene extends Phaser.Scene {
     const slots = this.formation.getSlotWorldPositions(this.leaderPos);
     const aimDirs = this.formation.getSlotAimWorldDirections();
     this.squad.forEach((character, i) => {
-      character.moveToward(slots[i]);
+      character.moveToward(slots[i], dt);
       character.updateMovementFacing(moveDir, dt);
       character.setAimDirection(aimDirs[i]);
       character.updateVisuals();
