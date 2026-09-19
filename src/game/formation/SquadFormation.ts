@@ -3,6 +3,12 @@ import type { FormationLink, FormationShape, Vec2 } from './Formation';
 
 const DEFAULT_TURN_RATE_RAD_PER_SEC = Math.PI * 2; // a full reversal takes ~0.5s, not instant
 const CHAIN_TURN_RATE_FACTOR = 0.7; // each link chases its parent a bit slower than the head turns, so lag compounds down the line
+const TRAIL_RETENTION_MULTIPLIER = 3; // keep enough recorded path behind for the largest offset, with headroom
+
+interface TrailSample {
+  dist: number; // cumulative distance the leader had traveled when this sample was recorded
+  pos: Vec2;
+}
 
 /**
  * Framework-agnostic formation state: shape, squad size, spacing, current facing, and a
@@ -10,14 +16,25 @@ const CHAIN_TURN_RATE_FACTOR = 0.7; // each link chases its parent a bit slower 
  *
  * Column/wedge slots don't just rotate rigidly around the leader: each non-head slot's own
  * orientation smoothly chases the slot it's linked to (see Formation.getFormationLinks, whose
- * `from` is always the more-forward slot), and its position is placed a fixed link-length
- * behind that parent along the parent's *current* orientation. Because the chase runs every
- * frame off elapsed time — not distance traveled — a heading change always fully propagates
- * down the chain eventually, even from a brief tap that barely moves the squad; it just does so
- * with a cascading delay, front to back, like a whip. Once everything has caught up this
- * reduces to exactly the plain rigid-offset formation. Circle has no front-to-back structure,
- * so it rotates rigidly as one ring instead — unless flipped, which swaps it for a paired
- * front-to-back "box" layout (see Formation.boxOffsets) that *does* chain-follow like the others.
+ * `from` is always the more-forward slot). Because that chase runs every frame off elapsed time
+ * — not distance traveled — a heading change always fully propagates down the chain eventually,
+ * even from a brief tap that barely moves the squad; it just does so with a cascading delay,
+ * front to back, like a whip. This orientation chain alone is what aim direction uses, and it's
+ * unaffected by anything below.
+ *
+ * Position is where wedge/box and column differ. Wedge/box slots are placed a fixed link-length
+ * behind their parent along the parent's *current* orientation — rigid rods with a lagging
+ * joint, which suits a formation with lateral spread. Column has none, so instead each slot
+ * literally walks the path the leader already walked: a trail of the leader's recent positions
+ * is recorded every frame, and slot i sits at the point exactly `i * spacing` of *traveled
+ * distance* back along it — a snake/conga-line curve through turns, not a rotated offset.
+ * Indexed by distance (not time) so a slot's position stays put once the leader stops, instead
+ * of collapsing back onto it, with extrapolation from the oldest recorded pose for when the
+ * leader hasn't traveled far enough yet (e.g. right after spawn).
+ *
+ * Circle has no front-to-back structure, so it rotates rigidly as one ring instead — unless
+ * flipped, which swaps it for a paired front-to-back "box" layout (see Formation.boxOffsets)
+ * that chain-follows like wedge.
  */
 export class SquadFormation {
   shape: FormationShape;
@@ -31,6 +48,8 @@ export class SquadFormation {
   private slotAngles: number[] = [];
   private slotPositions: Vec2[] = [];
   private flipped = false;
+  private traveledDistance = 0; // column only: cumulative distance the leader has walked, used to index the trail
+  private trail: TrailSample[] = []; // column only: recent leader path, sampled for the snake-like follow
 
   constructor(count = 1, shape: FormationShape = 'wedge', spacing = 50, turnRateRadPerSec = DEFAULT_TURN_RATE_RAD_PER_SEC) {
     this.count = clampCount(count);
@@ -119,6 +138,8 @@ export class SquadFormation {
   private updateChain(leaderPos: Vec2, dt: number) {
     const offsets = getFormationOffsets(this.shape, this.count, this.flipped);
     const parents = getFollowParents(this.shape, this.count, this.flipped);
+    const isColumn = this.shape === 'column';
+    if (isColumn) this.recordTrail(leaderPos);
 
     // Usually offsets[0] is (0,0) (the head sits exactly at the leader), but 2/4-person wedges
     // put a horizontal front rank there instead, so slot 0 itself needs the rotated offset too.
@@ -140,11 +161,61 @@ export class SquadFormation {
 
       this.slotAngles[i] = rotateTowardAngle(this.slotAngles[i], this.slotAngles[parent], this.chainTurnRateRadPerSec * dt);
 
-      const localLink = { x: offsets[i].x - offsets[parent].x, y: offsets[i].y - offsets[parent].y };
-      const r = rotateAndScale(localLink, this.slotAngles[parent], this.spacing);
-      const parentPos = this.slotPositions[parent];
-      this.slotPositions[i] = { x: parentPos.x + r.x, y: parentPos.y + r.y };
+      if (isColumn) {
+        // Snake-like: walk the leader's actual recorded path instead of rotating a fixed offset
+        // off the parent — |offsets[i].x| is already "how far behind the front" in spacing units.
+        this.slotPositions[i] = this.sampleTrailPosition(Math.abs(offsets[i].x) * this.spacing);
+      } else {
+        const localLink = { x: offsets[i].x - offsets[parent].x, y: offsets[i].y - offsets[parent].y };
+        const r = rotateAndScale(localLink, this.slotAngles[parent], this.spacing);
+        const parentPos = this.slotPositions[parent];
+        this.slotPositions[i] = { x: parentPos.x + r.x, y: parentPos.y + r.y };
+      }
     }
+  }
+
+  private recordTrail(leaderPos: Vec2) {
+    const last = this.trail[this.trail.length - 1];
+    if (last) {
+      this.traveledDistance += Math.hypot(leaderPos.x - last.pos.x, leaderPos.y - last.pos.y);
+    }
+    this.trail.push({ dist: this.traveledDistance, pos: { x: leaderPos.x, y: leaderPos.y } });
+
+    const maxBehind = this.spacing * MAX_SQUAD_SIZE * TRAIL_RETENTION_MULTIPLIER;
+    while (this.trail.length > 2 && this.traveledDistance - this.trail[0].dist > maxBehind) {
+      this.trail.shift();
+    }
+  }
+
+  /**
+   * Position exactly `distanceBehind` px back along the leader's traveled path. If the leader
+   * hasn't traveled far enough yet (e.g. just spawned), extrapolates straight back from the
+   * oldest known point along the current facing instead of clamping, so the column still has
+   * correct static spacing even before the leader has taken a single step.
+   */
+  private sampleTrailPosition(distanceBehind: number): Vec2 {
+    const targetDist = this.traveledDistance - distanceBehind;
+    const oldest = this.trail[0];
+    if (!oldest) return { x: 0, y: 0 };
+
+    if (targetDist <= oldest.dist) {
+      const shortfall = oldest.dist - targetDist;
+      return {
+        x: oldest.pos.x - Math.cos(this.facingAngle) * shortfall,
+        y: oldest.pos.y - Math.sin(this.facingAngle) * shortfall,
+      };
+    }
+
+    for (let i = this.trail.length - 1; i > 0; i--) {
+      const a = this.trail[i - 1];
+      const b = this.trail[i];
+      if (targetDist >= a.dist && targetDist <= b.dist) {
+        const span = b.dist - a.dist;
+        const frac = span > 1e-6 ? (targetDist - a.dist) / span : 0;
+        return { x: a.pos.x + (b.pos.x - a.pos.x) * frac, y: a.pos.y + (b.pos.y - a.pos.y) * frac };
+      }
+    }
+    return this.trail[this.trail.length - 1].pos;
   }
 }
 
