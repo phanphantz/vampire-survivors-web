@@ -5,9 +5,12 @@ import { MainScene } from './scenes/MainScene';
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'app',
-  width: 960,
-  height: 600,
   backgroundColor: '#14161c',
+  scale: {
+    mode: Phaser.Scale.RESIZE,
+    width: window.innerWidth,
+    height: window.innerHeight,
+  },
   physics: {
     default: 'arcade',
     arcade: { debug: false },
