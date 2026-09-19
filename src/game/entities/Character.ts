@@ -24,8 +24,8 @@ export const DEFAULT_STATS: CharacterStats = {
 const AIM_INDICATOR_LENGTH = 112;
 const AIM_INDICATOR_BAND_COUNT = 8; // concentric pie slices whose overlap simulates a center-to-edge fade
 const AIM_INDICATOR_BAND_ALPHA = 0.05; // per-layer alpha; compounds toward the center, thins out toward the tip
-const HEALTH_BAR_WIDTH = 80;
-const HEALTH_BAR_HEIGHT = 9;
+const HEALTH_BAR_WIDTH = 44; // roughly the sprite's own width, so neighbors ~spacing (50px) apart don't overlap much
+const HEALTH_BAR_HEIGHT = 6;
 const SPRITE_SCALE = CHARACTER_DISPLAY_HEIGHT / CHARACTER_FRAME_HEIGHT;
 const MOVEMENT_TURN_RATE_RAD_PER_SEC = Math.PI * 3; // how fast facingAngle catches up to actual movement
 const LEADER_ARROW_TIP_DISTANCE = AIM_INDICATOR_LENGTH + 6; // pokes past the attack-cone indicator so it reads in front of it
@@ -33,6 +33,8 @@ const LEADER_ARROW_ARM_LENGTH = 22;
 const LEADER_ARROW_SPREAD_RAD = Math.PI / 5; // how open the ">" chevron is
 const LEADER_ARROW_COLOR = 0x22d3ee;
 const LEADER_ARROW_OUTLINE_COLOR = 0x0f172a;
+const FOLLOWER_START_MOVE_DELAY_SEC = 0.2; // human reaction-time pause before a follower reacts to the squad setting off from a standstill
+const LEADER_MOVE_RESPONSE_RATE = 20; // ~0.05s time constant — the player's own input should feel immediate, not eased like the followers
 
 // Y-sort: depth tracks the sprite's foot position (its lower edge, not its center) every frame,
 // so a character standing further down the screen — visually closer to the viewer — always
@@ -62,6 +64,7 @@ export class Character {
   private healthBar: Phaser.GameObjects.Graphics;
   private leaderArrow: Phaser.GameObjects.Graphics | null = null;
   private lastFiredAt = -Infinity;
+  private startMoveDelayRemaining = 0; // followers only; counts down before they react to the squad setting off
 
   constructor(
     scene: Phaser.Scene,
@@ -83,14 +86,30 @@ export class Character {
   }
 
   /**
+   * Followers only: called when the squad transitions from a standstill to moving, so they hold
+   * position for a beat — a human reaction-time pause — before reacting, rather than setting off
+   * in perfect lockstep with the leader like a drone.
+   */
+  triggerStartMoveDelay() {
+    if (!this.isLeader) this.startMoveDelayRemaining = FOLLOWER_START_MOVE_DELAY_SEC;
+  }
+
+  /**
    * Eases toward its formation slot with framerate-independent exponential smoothing — the
    * fraction of the remaining gap closed this frame depends on actual elapsed time (dt), not on
    * frame count, so the catch-up speed (and thus how "delayed"/human a reshape looks) stays
-   * consistent regardless of frame rate. The sprite's own facing is driven entirely by
-   * aimDirection (see setAimDirection), not movement.
+   * consistent regardless of frame rate. The leader uses a much faster rate than followers so the
+   * player's own input always feels immediate — only followers get the slow, human catch-up (and
+   * the reaction-time pause from triggerStartMoveDelay). The sprite's own facing is driven
+   * entirely by aimDirection (see setAimDirection), not movement.
    */
   moveToward(target: { x: number; y: number }, dt: number) {
-    const factor = 1 - Math.exp(-this.stats.moveResponseRate * dt);
+    if (this.startMoveDelayRemaining > 0) {
+      this.startMoveDelayRemaining -= dt;
+      return;
+    }
+    const rate = this.isLeader ? LEADER_MOVE_RESPONSE_RATE : this.stats.moveResponseRate;
+    const factor = 1 - Math.exp(-rate * dt);
     this.sprite.x += (target.x - this.sprite.x) * factor;
     this.sprite.y += (target.y - this.sprite.y) * factor;
   }

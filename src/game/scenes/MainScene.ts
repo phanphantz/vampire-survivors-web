@@ -54,6 +54,7 @@ export class MainScene extends Phaser.Scene {
   private hud!: Phaser.GameObjects.Text;
   private gameOver = false;
   private isPaused = false;
+  private wasMoving = false;
 
   constructor() {
     super('main');
@@ -150,7 +151,13 @@ export class MainScene extends Phaser.Scene {
 
     const moveDir = this.readMoveInput();
     const dt = delta / 1000;
-    const wantsSprint = this.sprintKey.isDown && (moveDir.x !== 0 || moveDir.y !== 0);
+    const isMovingNow = moveDir.x !== 0 || moveDir.y !== 0;
+    if (isMovingNow && !this.wasMoving) {
+      // The squad just set off from a standstill — give followers a beat before they react.
+      this.squad.forEach((character) => character.triggerStartMoveDelay());
+    }
+    this.wasMoving = isMovingNow;
+    const wantsSprint = this.sprintKey.isDown && isMovingNow;
     const isSprinting = this.stamina.update(wantsSprint, dt);
     const moveSpeed = SQUAD_MOVE_SPEED * (isSprinting ? SPRINT_SPEED_MULTIPLIER : 1);
     this.leaderPos.x += moveDir.x * moveSpeed * dt;
