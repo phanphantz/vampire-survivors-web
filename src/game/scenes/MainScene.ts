@@ -29,6 +29,7 @@ export class MainScene extends Phaser.Scene {
   private wasd!: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
   private numberKeys: Phaser.Input.Keyboard.Key[] = [];
   private shapeKey!: Phaser.Input.Keyboard.Key;
+  private flipKey!: Phaser.Input.Keyboard.Key;
   private fullscreenKey!: Phaser.Input.Keyboard.Key;
   private sprintKey!: Phaser.Input.Keyboard.Key;
 
@@ -76,6 +77,7 @@ export class MainScene extends Phaser.Scene {
       this.input.keyboard!.addKey('FIVE'),
     ];
     this.shapeKey = this.input.keyboard!.addKey('F');
+    this.flipKey = this.input.keyboard!.addKey('X');
     this.fullscreenKey = this.input.keyboard!.addKey('ENTER');
     this.sprintKey = this.input.keyboard!.addKey('SHIFT');
 
@@ -108,6 +110,7 @@ export class MainScene extends Phaser.Scene {
     // arrays are already sized/shaped correctly when read later this same frame.
     this.handleSquadSizeInput();
     if (Phaser.Input.Keyboard.JustDown(this.shapeKey)) this.formation.cycleShape();
+    if (Phaser.Input.Keyboard.JustDown(this.flipKey)) this.formation.toggleFlip();
 
     const moveDir = this.readMoveInput();
     const dt = delta / 1000;
@@ -173,10 +176,16 @@ export class MainScene extends Phaser.Scene {
     this.squad.push(new Character(this, this.leaderPos.x, this.leaderPos.y, textureKey));
   }
 
-  /** Draws the formation's topology (who stands next to whom) between current squad positions. */
+  /** Draws the formation's topology: a smooth ring for circle, link lines between members otherwise. */
   private drawFormationLinks() {
     this.formationLinks.clear();
     this.formationLinks.lineStyle(2, 0x94a3b8, 0.45);
+
+    if (this.formation.shape === 'circle') {
+      this.formationLinks.strokeCircle(this.leaderPos.x, this.leaderPos.y, this.formation.spacing);
+      return;
+    }
+
     for (const link of getFormationLinks(this.formation.shape, this.squad.length)) {
       const a = this.squad[link.from];
       const b = this.squad[link.to];
@@ -336,9 +345,9 @@ export class MainScene extends Phaser.Scene {
   private updateHud() {
     this.hud.setText(
       [
-        `Squad: ${this.squad.length}/${MAX_SQUAD_SIZE}  Formation: ${this.formation.shape}`,
+        `Squad: ${this.squad.length}/${MAX_SQUAD_SIZE}  Formation: ${this.formation.shape}${this.formation.isFlipped() ? ' (flipped)' : ''}`,
         `Kills: ${this.kills}`,
-        'Move: WASD/Arrows   Sprint: Shift   Squad size: 1-5   Formation: F   Fullscreen: Enter',
+        'Move: WASD/Arrows   Sprint: Shift   Squad size: 1-5   Formation: F   Flip fire: X   Fullscreen: Enter',
       ].join('\n'),
     );
   }

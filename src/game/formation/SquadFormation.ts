@@ -29,6 +29,7 @@ export class SquadFormation {
 
   private slotAngles: number[] = [];
   private slotPositions: Vec2[] = [];
+  private flipped = false;
 
   constructor(count = 1, shape: FormationShape = 'wedge', spacing = 42, turnRateRadPerSec = DEFAULT_TURN_RATE_RAD_PER_SEC) {
     this.count = clampCount(count);
@@ -53,6 +54,15 @@ export class SquadFormation {
   cycleShape() {
     const order: FormationShape[] = ['wedge', 'column', 'circle'];
     this.shape = order[(order.indexOf(this.shape) + 1) % order.length];
+  }
+
+  /** Flips wedge/column shooting front-to-back (wedge fires backward, column's head/back swap). Positions are unaffected. */
+  toggleFlip() {
+    this.flipped = !this.flipped;
+  }
+
+  isFlipped(): boolean {
+    return this.flipped;
   }
 
   /**
@@ -87,7 +97,8 @@ export class SquadFormation {
 
   /** Per-slot aim direction (unit vectors) reflecting each formation's attack pattern. */
   getSlotAimWorldDirections(): Vec2[] {
-    const dirs = getAttackDirections(this.shape, this.count);
+    const shouldFlip = this.flipped && this.shape !== 'circle';
+    const dirs = getAttackDirections(this.shape, this.count).map((d) => (shouldFlip ? { x: -d.x, y: d.y } : d));
     if (this.shape === 'circle') {
       return dirs.map((dir) => rotateAndScale(dir, this.facingAngle, 1));
     }
