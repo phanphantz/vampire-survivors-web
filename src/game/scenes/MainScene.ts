@@ -104,6 +104,11 @@ export class MainScene extends Phaser.Scene {
 
     if (Phaser.Input.Keyboard.JustDown(this.fullscreenKey)) this.scale.toggleFullscreen();
 
+    // Squad size / shape changes must land before formation.update() runs, so its per-slot
+    // arrays are already sized/shaped correctly when read later this same frame.
+    this.handleSquadSizeInput();
+    if (Phaser.Input.Keyboard.JustDown(this.shapeKey)) this.formation.cycleShape();
+
     const moveDir = this.readMoveInput();
     const dt = delta / 1000;
     const wantsSprint = this.sprintKey.isDown && (moveDir.x !== 0 || moveDir.y !== 0);
@@ -116,9 +121,6 @@ export class MainScene extends Phaser.Scene {
 
     this.cameras.main.centerOn(this.leaderPos.x, this.leaderPos.y);
     this.background.setTilePosition(this.cameras.main.scrollX, this.cameras.main.scrollY);
-
-    this.handleSquadSizeInput();
-    if (Phaser.Input.Keyboard.JustDown(this.shapeKey)) this.formation.cycleShape();
 
     const slots = this.formation.getSlotWorldPositions(this.leaderPos);
     const aimDirs = this.formation.getSlotAimWorldDirections();
