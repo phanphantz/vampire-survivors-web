@@ -27,11 +27,11 @@ const HEALTH_BAR_HEIGHT = 5;
 const TURN_RATE_RAD_PER_SEC = Math.PI * 3; // faces its current running direction, not instantly
 const MIN_MOVE_DIST_FOR_TURN = 0.5; // px; ignore jitter when basically at the target already
 const SPRITE_SCALE = CHARACTER_DISPLAY_HEIGHT / CHARACTER_FRAME_HEIGHT;
-const MOVEMENT_ARROW_OFFSET = 26; // px above the sprite's head, clear of the health bar
-const MOVEMENT_ARROW_LENGTH = 14;
-const MOVEMENT_ARROW_HEAD_SIZE = 6;
+const MOVEMENT_ARROW_LENGTH = AIM_INDICATOR_LENGTH + 6; // pokes past the attack-cone indicator so it reads in front of it
+const MOVEMENT_ARROW_HEAD_SIZE = 9;
 const MOVEMENT_ARROW_HEAD_SPREAD_RAD = Math.PI / 6;
-const MOVEMENT_ARROW_COLOR = 0xfacc15;
+const MOVEMENT_ARROW_COLOR = 0x22d3ee;
+const MOVEMENT_ARROW_OUTLINE_COLOR = 0x0f172a;
 
 export class Character {
   sprite: Phaser.Physics.Arcade.Sprite;
@@ -137,36 +137,52 @@ export class Character {
     this.healthBar.fillStyle(barColor, 1);
     this.healthBar.fillRect(barX, barY, HEALTH_BAR_WIDTH * frac, HEALTH_BAR_HEIGHT);
 
-    if (this.movementArrow) this.drawMovementArrow(x, barY);
+    if (this.movementArrow) this.drawMovementArrow(x, y);
   }
 
   /**
-   * Leader-only chevron, floating above the health bar, pointing along facingAngle — the
-   * direction moveToward() last actually turned this character to face, which (unlike
-   * aimDirection) keeps pointing the way the squad was last walked even after it stops.
+   * Leader-only arrow radiating from the character's center along facingAngle — the direction
+   * moveToward() last actually turned this character to face, which (unlike aimDirection) keeps
+   * pointing the way the squad was last walked even after it stops. Drawn at a higher depth than
+   * (and slightly past the reach of) the attack-cone indicator so it always reads in front of it
+   * rather than getting lost underneath.
    */
-  private drawMovementArrow(x: number, healthBarY: number) {
+  private drawMovementArrow(x: number, y: number) {
     const arrow = this.movementArrow!;
     arrow.clear();
 
-    const originY = healthBarY - MOVEMENT_ARROW_OFFSET;
     const angle = this.facingAngle;
     const tipX = x + Math.cos(angle) * MOVEMENT_ARROW_LENGTH;
-    const tipY = originY + Math.sin(angle) * MOVEMENT_ARROW_LENGTH;
-
-    arrow.lineStyle(2, MOVEMENT_ARROW_COLOR, 0.9);
-    arrow.lineBetween(x, originY, tipX, tipY);
+    const tipY = y + Math.sin(angle) * MOVEMENT_ARROW_LENGTH;
 
     const leftX = tipX - Math.cos(angle - MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
     const leftY = tipY - Math.sin(angle - MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
     const rightX = tipX - Math.cos(angle + MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
     const rightY = tipY - Math.sin(angle + MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE;
 
-    arrow.fillStyle(MOVEMENT_ARROW_COLOR, 0.9);
+    // Dark outline first so the bright fill still pops against the light attack-cone indicator and the ground tile.
+    arrow.lineStyle(4, MOVEMENT_ARROW_OUTLINE_COLOR, 0.9);
+    arrow.lineBetween(x, y, tipX, tipY);
+    arrow.fillStyle(MOVEMENT_ARROW_OUTLINE_COLOR, 0.9);
     arrow.beginPath();
     arrow.moveTo(tipX, tipY);
     arrow.lineTo(leftX, leftY);
     arrow.lineTo(rightX, rightY);
+    arrow.closePath();
+    arrow.fillPath();
+
+    arrow.lineStyle(2, MOVEMENT_ARROW_COLOR, 1);
+    arrow.lineBetween(x, y, tipX, tipY);
+    const headShrink = 0.7; // fill arrowhead slightly smaller than its outline so the dark border stays visible all around
+    const innerLeftX = tipX - Math.cos(angle - MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE * headShrink;
+    const innerLeftY = tipY - Math.sin(angle - MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE * headShrink;
+    const innerRightX = tipX - Math.cos(angle + MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE * headShrink;
+    const innerRightY = tipY - Math.sin(angle + MOVEMENT_ARROW_HEAD_SPREAD_RAD) * MOVEMENT_ARROW_HEAD_SIZE * headShrink;
+    arrow.fillStyle(MOVEMENT_ARROW_COLOR, 1);
+    arrow.beginPath();
+    arrow.moveTo(tipX, tipY);
+    arrow.lineTo(innerLeftX, innerLeftY);
+    arrow.lineTo(innerRightX, innerRightY);
     arrow.closePath();
     arrow.fillPath();
   }
