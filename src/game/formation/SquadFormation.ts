@@ -32,7 +32,7 @@ export class SquadFormation {
   private slotPositions: Vec2[] = [];
   private flipped = false;
 
-  constructor(count = 1, shape: FormationShape = 'wedge', spacing = 100, turnRateRadPerSec = DEFAULT_TURN_RATE_RAD_PER_SEC) {
+  constructor(count = 1, shape: FormationShape = 'wedge', spacing = 50, turnRateRadPerSec = DEFAULT_TURN_RATE_RAD_PER_SEC) {
     this.count = clampCount(count);
     this.shape = shape;
     this.spacing = spacing;
