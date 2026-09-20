@@ -8,6 +8,15 @@ export const CHARACTER_FRAME_WIDTH = 112;
 export const CHARACTER_FRAME_HEIGHT = 444;
 export const CHARACTER_DISPLAY_HEIGHT = 168; // shrinks the ~444px-tall source art down to gameplay scale
 
+// Per-frame lowest opaque pixel row (source px, from the frame's top). The sheet isn't cropped to
+// the feet — and the padding under them differs between rows — so ground-anchored overlays read
+// this instead of assuming the frame's bottom edge is where the character stands.
+const frameFootRows: number[] = [];
+
+export function frameFootRow(frameIndex: number): number {
+  return frameFootRows[frameIndex] ?? CHARACTER_FRAME_HEIGHT;
+}
+
 const FRAMES_PER_DIRECTION = 4;
 const DIRECTION_COUNT = 8;
 
@@ -32,6 +41,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   create() {
+    this.measureFootRows();
     this.makeCircleTexture('enemy', 12, 0xf56565);
     this.makeCircleTexture('bullet', 4, 0xf6e05e);
     this.makeGridTileTexture('ground-tile', 100, 0x14161c, 0x22252e);
@@ -49,6 +59,33 @@ export class BootScene extends Phaser.Scene {
     }
 
     this.scene.start('main');
+  }
+
+  private measureFootRows() {
+    const source = this.textures.get(CHARACTER_TEXTURE).getSourceImage() as HTMLImageElement;
+    const canvas = document.createElement('canvas');
+    canvas.width = source.width;
+    canvas.height = source.height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(source, 0, 0);
+
+    const columns = Math.floor(source.width / CHARACTER_FRAME_WIDTH);
+    const rows = Math.floor(source.height / CHARACTER_FRAME_HEIGHT);
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < columns; col++) {
+        const { data } = ctx.getImageData(col * CHARACTER_FRAME_WIDTH, row * CHARACTER_FRAME_HEIGHT, CHARACTER_FRAME_WIDTH, CHARACTER_FRAME_HEIGHT);
+        let foot = CHARACTER_FRAME_HEIGHT;
+        search: for (let y = CHARACTER_FRAME_HEIGHT - 1; y >= 0; y--) {
+          for (let x = 0; x < CHARACTER_FRAME_WIDTH; x++) {
+            if (data[(y * CHARACTER_FRAME_WIDTH + x) * 4 + 3] > 20) {
+              foot = y + 1;
+              break search;
+            }
+          }
+        }
+        frameFootRows[row * columns + col] = foot;
+      }
+    }
   }
 
   /** A single repeatable ground tile, used as an infinitely scrolling TileSprite background. */

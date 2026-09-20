@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { angleToDirection8, rotateTowardAngle } from '../formation/Formation';
 import type { Vec2 } from '../formation/Formation';
-import { CHARACTER_DISPLAY_HEIGHT, CHARACTER_FRAME_HEIGHT, CHARACTER_TEXTURE, idleAnimKey } from '../scenes/BootScene';
+import { CHARACTER_DISPLAY_HEIGHT, CHARACTER_FRAME_HEIGHT, CHARACTER_TEXTURE, frameFootRow, idleAnimKey } from '../scenes/BootScene';
 
 export interface CharacterStats {
   fireRateMs: number;
@@ -183,7 +183,7 @@ export class Character {
     const endAngle = baseAngle + halfCone;
 
     // The cone sits on the ground, so it fans out from the character's feet, not the sprite's center.
-    const footY = y + this.sprite.displayHeight / 2;
+    const footY = y + (frameFootRow(Number(this.sprite.frame.name)) - CHARACTER_FRAME_HEIGHT / 2) * SPRITE_SCALE;
     const g = this.aimIndicator;
     g.clear();
 
