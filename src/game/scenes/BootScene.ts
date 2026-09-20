@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { GEM_TEXTURE } from '../pickups/GemSystem';
 
 /** One distinct tint per squad slot, so each teammate reads as a separate character despite sharing one sprite sheet. */
 export const CHARACTER_COLORS = [0x4fd1c5, 0xf6ad55, 0xb794f4, 0x68d391, 0xf687b3];
@@ -44,6 +45,7 @@ export class BootScene extends Phaser.Scene {
     this.measureFootRows();
     this.makeCircleTexture('enemy', 12, 0xf56565);
     this.makeCircleTexture('bullet', 4, 0xf6e05e);
+    this.makeGemTexture(GEM_TEXTURE);
     this.makeGridTileTexture('ground-tile', 100, 0x14161c, 0x22252e);
 
     for (let g = 0; g < DIRECTION_COUNT; g++) {
@@ -96,6 +98,21 @@ export class BootScene extends Phaser.Scene {
     g.lineStyle(1, line, 1);
     g.strokeRect(0, 0, size, size);
     g.generateTexture(key, size, size);
+    g.destroy();
+  }
+
+  /** A small faceted diamond, cyan with a lighter top facet. */
+  private makeGemTexture(key: string) {
+    const diamond = [new Phaser.Math.Vector2(8, 0), new Phaser.Math.Vector2(16, 8), new Phaser.Math.Vector2(8, 16), new Phaser.Math.Vector2(0, 8)];
+    const topFacet = [new Phaser.Math.Vector2(8, 0), new Phaser.Math.Vector2(16, 8), new Phaser.Math.Vector2(8, 8), new Phaser.Math.Vector2(0, 8)];
+    const g = this.add.graphics();
+    g.fillStyle(0x22d3ee, 1);
+    g.fillPoints(diamond, true);
+    g.fillStyle(0xa5f3fc, 1);
+    g.fillPoints(topFacet, true);
+    g.lineStyle(1, 0x0e7490, 1);
+    g.strokePoints(diamond, true);
+    g.generateTexture(key, 16, 16);
     g.destroy();
   }
 

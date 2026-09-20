@@ -7,10 +7,13 @@ import type { CharacterStats } from '../entities/Character';
 import { ArrowSystem } from '../combat/ArrowSystem';
 import { SwordSwingSystem } from '../combat/SwordSwingSystem';
 import { DaggerSystem } from '../combat/DaggerSystem';
+import { SquadCards } from '../ui/SquadCards';
 import { MobileControls } from '../ui/MobileControls';
+import { GemSystem } from '../pickups/GemSystem';
 import { SpearSystem } from '../combat/SpearSystem';
 import { Stamina } from '../entities/Stamina';
 import { CHARACTER_COLORS } from './BootScene';
+import { separateCircles } from '../world/separation';
 import { WorldPartition } from '../world/WorldPartition';
 import type { ChunkCoord } from '../world/WorldPartition';
 
@@ -19,6 +22,7 @@ const SPRINT_SPEED_MULTIPLIER = 1.8;
 const ENEMY_BASE_SPEED = 70;
 const ENEMY_HP = DEFAULT_STATS.damage * 2; // always exactly 2 hits to kill, regardless of difficulty ramp
 const ENEMY_CONTACT_DPS = 12;
+const ENEMY_DIAMETER = 24; // matches the 12px-radius enemy texture; enemies are kept at least this far apart
 const SPAWN_MARGIN = 60; // px outside the camera view where enemies pop in
 const CHUNK_SIZE = 500;
 const ACTIVE_RADIUS_CHUNKS = 4; // ~4000px active window kept simulated around the squad
@@ -40,6 +44,9 @@ const SLOT_STATS: Partial<CharacterStats>[] = [
 const DAGGERS_PER_BURST = 3;
 const DAGGER_STAGGER_MS = 70;
 const DAGGER_TARGETS = 3;
+const GEM_DEPTH = 5.5; // on the ground: above the attack cones (5), far below every Y-sorted character
+const ENEMY_GEM_DROP_MIN = 1;
+const ENEMY_GEM_DROP_MAX = 2;
 const BULLET_DEPTH = Y_SORT_DEPTH_OFFSET * 2;
 const UI_DEPTH = Y_SORT_DEPTH_OFFSET * 3;
 const PAUSE_DEPTH = Y_SORT_DEPTH_OFFSET * 4;
@@ -66,6 +73,9 @@ export class MainScene extends Phaser.Scene {
   private spears!: SpearSystem;
   private daggers!: DaggerSystem;
   private mobile!: MobileControls;
+  private gems!: GemSystem;
+  private cards!: SquadCards;
+  private gemsCollected = 0;
   private enemies!: Phaser.Physics.Arcade.Group;
   private background!: Phaser.GameObjects.TileSprite;
   private formationLinks!: Phaser.GameObjects.Graphics;
@@ -143,13 +153,18 @@ export class MainScene extends Phaser.Scene {
     this.staminaBar = this.add.graphics().setScrollFactor(0).setDepth(UI_DEPTH);
 
     this.spawnCharacter();
-    this.partition.update(this.leaderPos); // seed the initial active window without spawning
+    this.gems = new GemSystem(this, GEM_DEPTH);
+    // Seed the initial active window: gems only — enemies must not start on top of the squad.
+    this.scatterGems(this.partition.update(this.leaderPos));
 
     this.physics.add.overlap(this.bullets, this.enemies, (bulletObj, enemyObj) => {
       this.onBulletHitEnemy(bulletObj as Phaser.Physics.Arcade.Sprite, enemyObj as Phaser.Physics.Arcade.Sprite);
     });
 
     this.mobile = new MobileControls(this, PAUSE_DEPTH + 3); // above the pause overlay so the pause button can still resume
+
+    // On touch the joystick and action buttons flank the bottom edge, so the cards keep clear of them.
+    this.cards = new SquadCards(this, UI_DEPTH, this.mobile.enabled ? 230 : 20);
 
     this.hud = this.add.text(10, 10, '', {
       fontFamily: 'monospace',
@@ -237,8 +252,19 @@ export class MainScene extends Phaser.Scene {
 
     this.updateEnemies(dt);
     this.maybeSpawnEnemy(time);
-    this.spawnIntoNewlyActiveChunks(this.partition.update(this.leaderPos));
+    const newChunks = this.partition.update(this.leaderPos);
+    this.spawnIntoNewlyActiveChunks(newChunks);
+    this.scatterGems(newChunks);
+    this.gems.update(
+      dt,
+      this.squad.map((character) => character.getGroundPosition()),
+      (index, value) => {
+        this.squad[index].gainExp(value);
+        this.gemsCollected += value;
+      },
+    );
     this.cullFarEntities();
+    this.cards.update(this.squad, time);
     this.updateHud();
   }
 
@@ -412,6 +438,11 @@ export class MainScene extends Phaser.Scene {
     const hp = (enemy.getData('hp') as number) - damage;
     enemy.setData('hp', hp);
     if (hp <= 0) {
+      const { x, y } = enemy;
+      const drops = Phaser.Math.Between(ENEMY_GEM_DROP_MIN, ENEMY_GEM_DROP_MAX);
+      for (let i = 0; i < drops; i++) {
+        this.gems.spawn(x + Phaser.Math.Between(-22, 22), y + Phaser.Math.Between(-22, 22), 1, { x, y });
+      }
       enemy.destroy();
       this.kills += 1;
       return;
@@ -442,6 +473,12 @@ export class MainScene extends Phaser.Scene {
     this.spawnEnemyAt(pos.x, pos.y);
   }
 
+  private scatterGems(chunks: ChunkCoord[]) {
+    for (const chunk of chunks) {
+      this.gems.scatterChunk(chunk.cx * CHUNK_SIZE, chunk.cy * CHUNK_SIZE, CHUNK_SIZE);
+    }
+  }
+
   /** Exploration bonus: newly discovered chunks (from the world partition) get a chance to seed an enemy. */
   private spawnIntoNewlyActiveChunks(newChunks: ChunkCoord[]) {
     for (const chunk of newChunks) {
@@ -464,7 +501,6 @@ export class MainScene extends Phaser.Scene {
       const dir = new Phaser.Math.Vector2(this.leaderPos.x - enemy.x, this.leaderPos.y - enemy.y).normalize();
       enemy.x += dir.x * ENEMY_BASE_SPEED * dt;
       enemy.y += dir.y * ENEMY_BASE_SPEED * dt;
-      enemy.setDepth(Y_SORT_DEPTH_OFFSET + enemy.y); // same Y-sort space as characters
 
       const flashUntil = enemy.getData('flashUntil') as number | undefined;
       if (flashUntil !== undefined && this.time.now >= flashUntil) {
@@ -479,6 +515,12 @@ export class MainScene extends Phaser.Scene {
         }
       });
     }
+
+    // Enemies all chase the same target, so they bunch up; push overlapping ones apart so they
+    // read as solid bodies instead of stacking into one blob.
+    const active = (this.enemies.getChildren() as Phaser.Physics.Arcade.Sprite[]).filter((enemy) => enemy.active);
+    separateCircles(active, ENEMY_DIAMETER);
+    for (const enemy of active) enemy.setDepth(Y_SORT_DEPTH_OFFSET + enemy.y); // same Y-sort space as characters
 
     const survivorCount = this.squad.length;
     this.squad = this.squad.filter((character) => {
@@ -495,6 +537,7 @@ export class MainScene extends Phaser.Scene {
 
   /** Bounds the simulation: anything that has drifted outside the partition's active window is dropped. */
   private cullFarEntities() {
+    this.gems.cull((pos) => this.partition.isActive(pos));
     for (const obj of this.enemies.getChildren()) {
       const enemy = obj as Phaser.Physics.Arcade.Sprite;
       if (enemy.active && !this.partition.isActive({ x: enemy.x, y: enemy.y })) {
@@ -525,7 +568,7 @@ export class MainScene extends Phaser.Scene {
     this.gameOver = true;
     this.physics.pause();
     this.add
-      .text(this.cameras.main.width / 2, this.cameras.main.height / 2, `GAME OVER\nKills: ${this.kills}\n${this.mobile.enabled ? 'Tap to retry' : 'Refresh to retry'}`, {
+      .text(this.cameras.main.width / 2, this.cameras.main.height / 2, `GAME OVER\nKills: ${this.kills}   Gems: ${this.gemsCollected}\n${this.mobile.enabled ? 'Tap to retry' : 'Refresh to retry'}`, {
         fontFamily: 'monospace',
         fontSize: '28px',
         color: '#f56565',
@@ -541,7 +584,7 @@ export class MainScene extends Phaser.Scene {
     this.hud.setText(
       [
         `Squad: ${this.squad.length}/${MAX_SQUAD_SIZE}  Formation: ${this.formation.shape}${this.formation.isFlipped() ? ' (flipped)' : ''}`,
-        `Kills: ${this.kills}`,
+        `Kills: ${this.kills}   Gems: ${this.gemsCollected}`,
         ...(this.mobile.enabled ? [] : ['Move: WASD/Arrows   Sprint: Shift   Squad size: 1-5   Formation: F   Flip fire: X   Fullscreen: Enter   Pause: Esc']),
       ].join('\n'),
     );

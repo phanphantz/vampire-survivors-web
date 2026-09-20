@@ -69,6 +69,8 @@ export class Character {
   maxHp = 30;
   hp = this.maxHp;
   aimDirection: Vec2 = { x: 1, y: 0 };
+  level = 1;
+  exp = 0; // gems collected toward the next level
   readonly isLeader: boolean;
 
   readonly tint: number; // the cone and its attacks take the character's own color so overlapping cones stay attributable
@@ -179,6 +181,24 @@ export class Character {
     this.sprite.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
   }
 
+  /** Gems needed to go from the current level to the next. */
+  get expToNext(): number {
+    return 6 + 4 * (this.level - 1);
+  }
+
+  gainExp(amount: number) {
+    this.exp += amount;
+    while (this.exp >= this.expToNext) {
+      this.exp -= this.expToNext;
+      this.level += 1;
+    }
+  }
+
+  /** 1 the instant it fires, draining to 0 (ready) as the fire-rate cooldown elapses. */
+  getCooldownFraction(timeMs: number): number {
+    return 1 - Phaser.Math.Clamp((timeMs - this.lastFiredAt) / this.stats.fireRateMs, 0, 1);
+  }
+
   /** Where the attack cone (and melee swings) originate: the feet, per the measured sprite frame. */
   getGroundPosition(): Vec2 {
     const { x, y } = this.sprite;
@@ -257,7 +277,7 @@ export class Character {
     this.healthBar.fillRect(barX, barY, HEALTH_BAR_WIDTH * frac, HEALTH_BAR_HEIGHT);
 
     // Attack countdown: full the instant it fires, draining to empty as the fire-rate cooldown elapses.
-    const cooldownFrac = 1 - Phaser.Math.Clamp((timeMs - this.lastFiredAt) / this.stats.fireRateMs, 0, 1);
+    const cooldownFrac = this.getCooldownFraction(timeMs);
     const cooldownX = x - COOLDOWN_BAR_WIDTH / 2;
     const cooldownY = barY + HEALTH_BAR_HEIGHT + 1 + COOLDOWN_BAR_GAP;
     this.healthBar.fillStyle(0x000000, 0.5);
