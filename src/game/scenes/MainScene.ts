@@ -12,13 +12,14 @@ import { MobileControls } from '../ui/MobileControls';
 import { GemSystem } from '../pickups/GemSystem';
 import { SpearSystem } from '../combat/SpearSystem';
 import { Stamina } from '../entities/Stamina';
+import { SprintDash } from '../entities/SprintDash';
+import { SprintTrail } from '../ui/SprintTrail';
 import { CHARACTER_COLORS } from './BootScene';
 import { separateCircles } from '../world/separation';
 import { WorldPartition } from '../world/WorldPartition';
 import type { ChunkCoord } from '../world/WorldPartition';
 
 const SQUAD_MOVE_SPEED = 220; // px/sec
-const SPRINT_SPEED_MULTIPLIER = 1.8;
 const ENEMY_BASE_SPEED = 70;
 const ENEMY_HP = DEFAULT_STATS.damage * 2; // always exactly 2 hits to kill, regardless of difficulty ramp
 const ENEMY_CONTACT_DPS = 12;
@@ -57,6 +58,8 @@ export class MainScene extends Phaser.Scene {
   private leaderPos: Vec2 = { x: 0, y: 0 };
   private partition = new WorldPartition(CHUNK_SIZE, ACTIVE_RADIUS_CHUNKS);
   private stamina = new Stamina();
+  private sprintDash = new SprintDash();
+  private sprintTrail!: SprintTrail;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
@@ -126,6 +129,7 @@ export class MainScene extends Phaser.Scene {
     this.flipKey = this.input.keyboard!.addKey('X');
     this.fullscreenKey = this.input.keyboard!.addKey('ENTER');
     this.sprintKey = this.input.keyboard!.addKey('SHIFT');
+    this.sprintTrail = new SprintTrail(this);
     this.pauseKey = this.input.keyboard!.addKey('ESC');
 
     this.bullets = this.physics.add.group();
@@ -226,7 +230,8 @@ export class MainScene extends Phaser.Scene {
     this.wasMoving = isMovingNow;
     const wantsSprint = (this.sprintKey.isDown || this.mobile.sprintHeld) && isMovingNow;
     const isSprinting = this.stamina.update(wantsSprint, dt);
-    const moveSpeed = SQUAD_MOVE_SPEED * (isSprinting ? SPRINT_SPEED_MULTIPLIER : 1);
+    const moveSpeed = SQUAD_MOVE_SPEED * this.sprintDash.update(isSprinting, dt);
+    if (this.sprintDash.justStarted) this.sprintTrail.burst(this.squad, moveDir);
     this.leaderPos.x += moveDir.x * moveSpeed * dt;
     this.leaderPos.y += moveDir.y * moveSpeed * dt;
     this.formation.update(moveDir, this.leaderPos, dt);
@@ -244,6 +249,7 @@ export class MainScene extends Phaser.Scene {
       character.updateVisuals(time);
       this.tryFire(character, time);
     });
+    this.sprintTrail.update(time, isSprinting, this.squad);
     this.drawFormationLinks();
     this.arrows.update(dt);
     this.swords.update(dt);
