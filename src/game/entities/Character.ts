@@ -23,7 +23,13 @@ export const DEFAULT_STATS: CharacterStats = {
 
 const AIM_INDICATOR_LENGTH = 112;
 const AIM_INDICATOR_BAND_COUNT = 8; // concentric pie slices whose overlap simulates a center-to-edge fade
-const AIM_INDICATOR_BAND_ALPHA = 0.05; // per-layer alpha; compounds toward the center, thins out toward the tip
+const AIM_INDICATOR_BAND_ALPHA = 0.035; // per-layer alpha; compounds toward the center, thins out toward the tip
+const AIM_INDICATOR_EDGE_ALPHA = 0.32;
+const AIM_INDICATOR_RIM_ALPHA = 0.2;
+const AIM_INDICATOR_CENTERLINE_ALPHA = 0.18;
+// Ground-level overlay: a fixed depth above the background and formation links (4) but far below
+// every Y-sorted character/enemy (Y_SORT_DEPTH_OFFSET + y), so no cone ever draws over a body.
+const AIM_INDICATOR_DEPTH = 5;
 const HEALTH_BAR_WIDTH = 44; // roughly the sprite's own width, so neighbors ~spacing (50px) apart don't overlap much
 const HEALTH_BAR_HEIGHT = 6;
 const SPRITE_SCALE = CHARACTER_DISPLAY_HEIGHT / CHARACTER_FRAME_HEIGHT;
@@ -40,8 +46,8 @@ const LEADER_MOVE_RESPONSE_RATE = 20; // ~0.05s time constant — the player's o
 // so a character standing further down the screen — visually closer to the viewer — always
 // renders in front of one standing further up, and the ordering updates live as either moves.
 // Offset well clear of zero so it stays positive (and thus in front of the background/formation
-// links) even when world Y goes negative, which it can in this unbounded world. Overlays (cone,
-// health bar, leader arrow) are pinned to the same base so the whole per-character stack sorts
+// links) even when world Y goes negative, which it can in this unbounded world. Overlays (health bar,
+// leader arrow) are pinned to the same base so the whole per-character stack sorts
 // as one unit instead of interleaving with a neighbor's.
 export const Y_SORT_DEPTH_OFFSET = 100_000;
 
@@ -57,6 +63,7 @@ export class Character {
   aimDirection: Vec2 = { x: 1, y: 0 };
   readonly isLeader: boolean;
 
+  private readonly tint: number; // the cone takes the character's own color so overlapping cones stay attributable
   private currentDirectionIndex = -1;
   private facingAngle = 0; // smoothed; catches up to targetFacingAngle every frame, moving or not
   private targetFacingAngle = 0; // last direction actually moved toward; sticks once movement stops
@@ -76,11 +83,12 @@ export class Character {
   ) {
     this.stats = { ...DEFAULT_STATS, ...stats };
     this.isLeader = isLeader;
+    this.tint = tint;
     this.sprite = scene.physics.add.sprite(x, y, CHARACTER_TEXTURE);
     this.sprite.setScale(SPRITE_SCALE);
     this.sprite.setTint(tint);
     this.playDirectionForAim();
-    this.aimIndicator = scene.add.graphics().setDepth(-1); // behind the sprite, not in front of it
+    this.aimIndicator = scene.add.graphics().setDepth(AIM_INDICATOR_DEPTH);
     this.healthBar = scene.add.graphics().setDepth(6);
     if (this.isLeader) this.leaderArrow = scene.add.graphics().setDepth(7);
   }
@@ -160,43 +168,59 @@ export class Character {
     this.lastFiredAt = timeMs;
   }
 
-  /** Redraws the aim-cone indicator and health gauge at the sprite's current position. */
+  /** Redraws the aim-cone indicator (anchored at the sprite's feet) and health gauge. */
   updateVisuals() {
     const { x, y } = this.sprite;
 
     const baseDepth = footDepth(this.sprite);
-    this.aimIndicator.setDepth(baseDepth - 2);
     this.sprite.setDepth(baseDepth);
     this.healthBar.setDepth(baseDepth + 1);
     this.leaderArrow?.setDepth(baseDepth + 2);
 
     const baseAngle = Math.atan2(this.aimDirection.y, this.aimDirection.x);
     const halfCone = Phaser.Math.DegToRad(this.stats.attackConeDeg) / 2;
+    const startAngle = baseAngle - halfCone;
+    const endAngle = baseAngle + halfCone;
 
-    this.aimIndicator.clear();
+    // The cone sits on the ground, so it fans out from the character's feet, not the sprite's center.
+    const footY = y + this.sprite.displayHeight / 2;
+    const g = this.aimIndicator;
+    g.clear();
 
     // Drawn outer-radius-first, each successive (smaller) slice overlaid on top: their alphas
-    // compound near the center and thin out toward the edge, faking a radial fade without a
+    // compound near the feet and thin out toward the edge, faking a radial fade without a
     // gradient fill API.
     for (let i = AIM_INDICATOR_BAND_COUNT; i >= 1; i--) {
       const r = (AIM_INDICATOR_LENGTH * i) / AIM_INDICATOR_BAND_COUNT;
-      this.aimIndicator.fillStyle(0xffffff, AIM_INDICATOR_BAND_ALPHA);
-      this.aimIndicator.beginPath();
-      this.aimIndicator.moveTo(x, y);
-      this.aimIndicator.arc(x, y, r, baseAngle - halfCone, baseAngle + halfCone, false);
-      this.aimIndicator.closePath();
-      this.aimIndicator.fillPath();
+      g.fillStyle(this.tint, AIM_INDICATOR_BAND_ALPHA);
+      g.beginPath();
+      g.moveTo(x, footY);
+      g.arc(x, footY, r, startAngle, endAngle, false);
+      g.closePath();
+      g.fillPath();
     }
 
     // Graphics.arc() after beginPath() doesn't reliably stroke the two radial edges (only the
-    // curved rim), so the cone's start/end boundaries are drawn explicitly as solid lines.
-    this.aimIndicator.lineStyle(1.5, 0xffffff, 0.7);
-    const startX = x + Math.cos(baseAngle - halfCone) * AIM_INDICATOR_LENGTH;
-    const startY = y + Math.sin(baseAngle - halfCone) * AIM_INDICATOR_LENGTH;
-    const endX = x + Math.cos(baseAngle + halfCone) * AIM_INDICATOR_LENGTH;
-    const endY = y + Math.sin(baseAngle + halfCone) * AIM_INDICATOR_LENGTH;
-    this.aimIndicator.lineBetween(x, y, startX, startY);
-    this.aimIndicator.lineBetween(x, y, endX, endY);
+    // curved rim), so the cone's boundaries are drawn explicitly. The edges are split into
+    // segments whose alpha falls off toward the tip, so the outline fades with the fill instead
+    // of ending in a hard line.
+    const EDGE_SEGMENTS = 6;
+    for (let i = 0; i < EDGE_SEGMENTS; i++) {
+      const r0 = (AIM_INDICATOR_LENGTH * i) / EDGE_SEGMENTS;
+      const r1 = (AIM_INDICATOR_LENGTH * (i + 1)) / EDGE_SEGMENTS;
+      g.lineStyle(2, this.tint, AIM_INDICATOR_EDGE_ALPHA * (1 - (i / EDGE_SEGMENTS) * 0.7));
+      for (const a of [startAngle, endAngle]) {
+        g.lineBetween(x + Math.cos(a) * r0, footY + Math.sin(a) * r0, x + Math.cos(a) * r1, footY + Math.sin(a) * r1);
+      }
+    }
+
+    // Faint outer rim and a centerline so the exact aim direction reads at a glance.
+    g.lineStyle(2, this.tint, AIM_INDICATOR_RIM_ALPHA);
+    g.beginPath();
+    g.arc(x, footY, AIM_INDICATOR_LENGTH, startAngle, endAngle, false);
+    g.strokePath();
+    g.lineStyle(1, this.tint, AIM_INDICATOR_CENTERLINE_ALPHA);
+    g.lineBetween(x, footY, x + Math.cos(baseAngle) * AIM_INDICATOR_LENGTH, footY + Math.sin(baseAngle) * AIM_INDICATOR_LENGTH);
 
     const frac = Phaser.Math.Clamp(this.hp / this.maxHp, 0, 1);
     const barX = x - HEALTH_BAR_WIDTH / 2;
@@ -210,7 +234,7 @@ export class Character {
     this.healthBar.fillStyle(barColor, 1);
     this.healthBar.fillRect(barX, barY, HEALTH_BAR_WIDTH * frac, HEALTH_BAR_HEIGHT);
 
-    if (this.leaderArrow) this.drawLeaderArrow(x, y, this.facingAngle);
+    if (this.leaderArrow) this.drawLeaderArrow(x, footY, this.facingAngle);
   }
 
   /**
