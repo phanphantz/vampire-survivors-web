@@ -6,11 +6,17 @@ body {
   height: 100%;
   overflow: hidden;
   background: #14161c;
+  touch-action: none; /* the game owns every gesture: no scroll, pinch-zoom or double-tap zoom */
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 #app {
   width: 100vw;
   height: 100vh;
+  height: 100dvh; /* excludes mobile browser chrome that 100vh counts */
 }
 
 #app canvas {

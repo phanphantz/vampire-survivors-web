@@ -3,7 +3,10 @@ import { angleToDirection8, rotateTowardAngle } from '../formation/Formation';
 import type { Vec2 } from '../formation/Formation';
 import { CHARACTER_DISPLAY_HEIGHT, CHARACTER_FRAME_HEIGHT, CHARACTER_TEXTURE, frameFootRow, idleAnimKey } from '../scenes/BootScene';
 
+export type AttackKind = 'shot' | 'arrow' | 'daggers' | 'sword' | 'spear';
+
 export interface CharacterStats {
+  attack: AttackKind; // 'shot' = plain single bullet; 'arrow' = piercing, curving chain arrow (ArrowSystem); 'daggers' = quick burst of light daggers at 1-3 enemies; 'sword' = melee swing along the attack-cone arc (SwordSwingSystem); 'spear' = long, heavy thrust that pierces everything on its line (SpearSystem)
   fireRateMs: number;
   damage: number;
   range: number;
@@ -13,6 +16,7 @@ export interface CharacterStats {
 }
 
 export const DEFAULT_STATS: CharacterStats = {
+  attack: 'shot',
   fireRateMs: 450,
   damage: 10,
   range: 240,
@@ -21,7 +25,7 @@ export const DEFAULT_STATS: CharacterStats = {
   attackConeDeg: 90,
 };
 
-const AIM_INDICATOR_LENGTH = 112;
+export const AIM_INDICATOR_LENGTH = 112;
 const AIM_INDICATOR_BAND_COUNT = 8; // concentric pie slices whose overlap simulates a center-to-edge fade
 const AIM_INDICATOR_BAND_ALPHA = 0.035; // per-layer alpha; compounds toward the center, thins out toward the tip
 const AIM_INDICATOR_EDGE_ALPHA = 0.32;
@@ -30,9 +34,15 @@ const AIM_INDICATOR_EDGE_ALPHA = 0.32;
 const AIM_INDICATOR_DEPTH = 5;
 const HEALTH_BAR_WIDTH = 44; // roughly the sprite's own width, so neighbors ~spacing (50px) apart don't overlap much
 const HEALTH_BAR_HEIGHT = 6;
+const COOLDOWN_BAR_WIDTH = 32; // narrower and thinner than the health bar it hangs under
+const COOLDOWN_BAR_HEIGHT = 3;
+const COOLDOWN_BAR_GAP = 2;
+const COOLDOWN_BAR_COLOR = 0xfacc15;
+const DAMAGE_FLASH_DURATION_MS = 100;
+const DAMAGE_FLASH_MIN_INTERVAL_MS = 250; // contact damage ticks every frame; without this the sprite would stay solid white instead of pulsing
 const SPRITE_SCALE = CHARACTER_DISPLAY_HEIGHT / CHARACTER_FRAME_HEIGHT;
 const MOVEMENT_TURN_RATE_RAD_PER_SEC = Math.PI * 3; // how fast facingAngle catches up to actual movement
-const LEADER_ARROW_TIP_DISTANCE = AIM_INDICATOR_LENGTH + 6; // pokes past the attack-cone indicator so it reads in front of it
+const LEADER_ARROW_TIP_DISTANCE = AIM_INDICATOR_LENGTH + 40; // floats clear beyond the attack-cone indicator so the two never crowd each other
 const LEADER_ARROW_ARM_LENGTH = 22;
 const LEADER_ARROW_SPREAD_RAD = Math.PI / 5; // how open the ">" chevron is
 const LEADER_ARROW_COLOR = 0x22d3ee;
@@ -61,7 +71,7 @@ export class Character {
   aimDirection: Vec2 = { x: 1, y: 0 };
   readonly isLeader: boolean;
 
-  private readonly tint: number; // the cone takes the character's own color so overlapping cones stay attributable
+  readonly tint: number; // the cone and its attacks take the character's own color so overlapping cones stay attributable
   private currentDirectionIndex = -1;
   private facingAngle = 0; // smoothed; catches up to targetFacingAngle every frame, moving or not
   private targetFacingAngle = 0; // last direction actually moved toward; sticks once movement stops
@@ -69,6 +79,8 @@ export class Character {
   private healthBar: Phaser.GameObjects.Graphics;
   private leaderArrow: Phaser.GameObjects.Graphics | null = null;
   private lastFiredAt = -Infinity;
+  private flashUntil = 0;
+  private lastFlashAt = -Infinity;
   private holdRemaining = 0; // followers only; holds position (moveToward is a no-op) while > 0 — see triggerStartMoveDelay
 
   constructor(
@@ -158,6 +170,21 @@ export class Character {
     this.sprite.play(idleAnimKey(directionIndex));
   }
 
+  /** Applies damage and, at most once per DAMAGE_FLASH_MIN_INTERVAL_MS, flashes the sprite solid white. */
+  takeDamage(amount: number, timeMs: number) {
+    this.hp -= amount;
+    if (timeMs - this.lastFlashAt < DAMAGE_FLASH_MIN_INTERVAL_MS) return;
+    this.lastFlashAt = timeMs;
+    this.flashUntil = timeMs + DAMAGE_FLASH_DURATION_MS;
+    this.sprite.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
+  }
+
+  /** Where the attack cone (and melee swings) originate: the feet, per the measured sprite frame. */
+  getGroundPosition(): Vec2 {
+    const { x, y } = this.sprite;
+    return { x, y: y + (frameFootRow(Number(this.sprite.frame.name)) - CHARACTER_FRAME_HEIGHT / 2) * SPRITE_SCALE };
+  }
+
   canFire(timeMs: number): boolean {
     return timeMs - this.lastFiredAt >= this.stats.fireRateMs;
   }
@@ -166,9 +193,14 @@ export class Character {
     this.lastFiredAt = timeMs;
   }
 
-  /** Redraws the aim-cone indicator (anchored at the sprite's feet) and health gauge. */
-  updateVisuals() {
+  /** Redraws the aim-cone indicator (anchored at the sprite's feet), health gauge and attack-cooldown gauge. */
+  updateVisuals(timeMs: number) {
     const { x, y } = this.sprite;
+
+    if (this.flashUntil > 0 && timeMs >= this.flashUntil) {
+      this.flashUntil = 0;
+      this.sprite.setTint(this.tint).setTintMode(Phaser.TintModes.MULTIPLY);
+    }
 
     const baseDepth = footDepth(this.sprite);
     this.sprite.setDepth(baseDepth);
@@ -181,7 +213,7 @@ export class Character {
     const endAngle = baseAngle + halfCone;
 
     // The cone sits on the ground, so it fans out from the character's feet, not the sprite's center.
-    const footY = y + (frameFootRow(Number(this.sprite.frame.name)) - CHARACTER_FRAME_HEIGHT / 2) * SPRITE_SCALE;
+    const footY = this.getGroundPosition().y;
     const g = this.aimIndicator;
     g.clear();
 
@@ -223,6 +255,17 @@ export class Character {
     const barColor = frac > 0.5 ? 0x4ade80 : frac > 0.25 ? 0xfacc15 : 0xef4444;
     this.healthBar.fillStyle(barColor, 1);
     this.healthBar.fillRect(barX, barY, HEALTH_BAR_WIDTH * frac, HEALTH_BAR_HEIGHT);
+
+    // Attack countdown: full the instant it fires, draining to empty as the fire-rate cooldown elapses.
+    const cooldownFrac = 1 - Phaser.Math.Clamp((timeMs - this.lastFiredAt) / this.stats.fireRateMs, 0, 1);
+    const cooldownX = x - COOLDOWN_BAR_WIDTH / 2;
+    const cooldownY = barY + HEALTH_BAR_HEIGHT + 1 + COOLDOWN_BAR_GAP;
+    this.healthBar.fillStyle(0x000000, 0.5);
+    this.healthBar.fillRect(cooldownX - 1, cooldownY - 1, COOLDOWN_BAR_WIDTH + 2, COOLDOWN_BAR_HEIGHT + 2);
+    this.healthBar.fillStyle(0x2d3339, 1);
+    this.healthBar.fillRect(cooldownX, cooldownY, COOLDOWN_BAR_WIDTH, COOLDOWN_BAR_HEIGHT);
+    this.healthBar.fillStyle(COOLDOWN_BAR_COLOR, 1);
+    this.healthBar.fillRect(cooldownX, cooldownY, COOLDOWN_BAR_WIDTH * cooldownFrac, COOLDOWN_BAR_HEIGHT);
 
     if (this.leaderArrow) this.drawLeaderArrow(x, footY, this.facingAngle);
   }
