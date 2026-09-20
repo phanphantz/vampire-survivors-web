@@ -25,8 +25,6 @@ const AIM_INDICATOR_LENGTH = 112;
 const AIM_INDICATOR_BAND_COUNT = 8; // concentric pie slices whose overlap simulates a center-to-edge fade
 const AIM_INDICATOR_BAND_ALPHA = 0.035; // per-layer alpha; compounds toward the center, thins out toward the tip
 const AIM_INDICATOR_EDGE_ALPHA = 0.32;
-const AIM_INDICATOR_RIM_ALPHA = 0.2;
-const AIM_INDICATOR_CENTERLINE_ALPHA = 0.18;
 // Ground-level overlay: a fixed depth above the background and formation links (4) but far below
 // every Y-sorted character/enemy (Y_SORT_DEPTH_OFFSET + y), so no cone ever draws over a body.
 const AIM_INDICATOR_DEPTH = 5;
@@ -213,14 +211,6 @@ export class Character {
         g.lineBetween(x + Math.cos(a) * r0, footY + Math.sin(a) * r0, x + Math.cos(a) * r1, footY + Math.sin(a) * r1);
       }
     }
-
-    // Faint outer rim and a centerline so the exact aim direction reads at a glance.
-    g.lineStyle(2, this.tint, AIM_INDICATOR_RIM_ALPHA);
-    g.beginPath();
-    g.arc(x, footY, AIM_INDICATOR_LENGTH, startAngle, endAngle, false);
-    g.strokePath();
-    g.lineStyle(1, this.tint, AIM_INDICATOR_CENTERLINE_ALPHA);
-    g.lineBetween(x, footY, x + Math.cos(baseAngle) * AIM_INDICATOR_LENGTH, footY + Math.sin(baseAngle) * AIM_INDICATOR_LENGTH);
 
     const frac = Phaser.Math.Clamp(this.hp / this.maxHp, 0, 1);
     const barX = x - HEALTH_BAR_WIDTH / 2;
